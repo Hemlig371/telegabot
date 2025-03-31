@@ -20,8 +20,8 @@ bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot)
 
 # Подключение к базе данных
-db_path = os.path.join(os.getcwd(), "tasks.db")
-conn = sqlite3.connect(db_path, check_same_thread=False)
+DB_PATH = "/bd1/tasks.db"
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 
 cursor = conn.cursor()
 cursor.execute('''CREATE TABLE IF NOT EXISTS tasks (
