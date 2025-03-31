@@ -21,7 +21,7 @@ dp = Dispatcher(bot)
 
 # Подключение к базе данных
 db_path = os.path.join(os.getcwd(), "tasks.db")
-conn = sqlite3.connect(db_path)
+conn = sqlite3.connect(db_path, check_same_thread=False)
 
 cursor = conn.cursor()
 cursor.execute('''CREATE TABLE IF NOT EXISTS tasks (
@@ -38,17 +38,19 @@ conn.commit()
 async def new_task(message: types.Message):
     try:
         # Используем регулярное выражение для разбора команды
-        match = re.match(r"^([\w\s]+) @(\w+) -([\d-]+)$", message.text)
+        match = re.match(r"^-([\w\s]+) @(\w+) -([\d-]+)$", message.text)
         
         if not match:
             await message.reply("⚠️ Неверный формат! Используйте: -описание @исполнитель -срок")
             return
 
         task_text, user_id, deadline = match.groups()
-
-        cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-                       (message.chat.id, user_id, task_text.strip(), deadline.strip()))
-        conn.commit()
+    try:
+      cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
+                   (message.chat.id, user_id, task_text.strip(), deadline.strip()))
+    conn.commit()
+    except sqlite3.Error as e:
+        await message.reply(f"⚠ Ошибка базы данных: {str(e)}")
 
         await message.reply(f"✅ Задача добавлена: {task_text.strip()} для @{user_id} (до {deadline.strip()})")
     except Exception as e:
@@ -82,7 +84,7 @@ async def list_tasks(message: types.Message):
 async def help_command(message: types.Message):
     help_text = (
         "📌 Список доступных команд:\n"
-        "/newtask @исполнитель описание дедлайн - Добавить новую задачу\n"
+        "/newtask -описание @исполнитель -дедлайн - Добавить новую задачу\n"
         "/status ID статус - Изменить статус задачи\n"
         "/tasks - Просмотреть список задач\n"
         "/help - Показать список команд"
@@ -93,7 +95,7 @@ async def help_command(message: types.Message):
 async def check_deadlines():
     while True:
         now = datetime.now().strftime("%Y-%m-%d")
-        cursor.execute("SELECT id, user_id, task_text FROM tasks WHERE deadline=? AND status != 'исполнено'", (now,))
+        cursor.execute("SELECT id, chat_id, task_text FROM tasks WHERE deadline=? AND status != 'исполнено'", (now,))
         tasks = cursor.fetchall()
         for task in tasks:
             await bot.send_message(task[1], f"⏳ Напоминание о задаче {task[0]}: {task[2]}")
