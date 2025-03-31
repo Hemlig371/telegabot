@@ -6,6 +6,7 @@ from aiogram.types import ParseMode
 from aiogram.utils import executor
 from datetime import datetime, timedelta
 import os
+from aiohttp import web
 
 # Укажите токен бота
 API_TOKEN = os.getenv('apibotkey')
@@ -88,3 +89,17 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.create_task(check_deadlines())
     executor.start_polling(dp, skip_updates=True)
+
+
+#HealthCheck
+
+async def health_check(request):
+    return web.Response(text="OK")
+
+app = web.Application()
+app.router.add_get('/health', health_check)
+
+if __name__ == '__main__':
+    # Запуск HTTP-сервера на порту 8000
+    web.run_app(app, port=8000)
+
