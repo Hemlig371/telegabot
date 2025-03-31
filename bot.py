@@ -7,6 +7,7 @@ from aiogram.utils import executor
 from datetime import datetime, timedelta
 import os
 from aiohttp import web
+import re
 
 # Укажите токен бота
 API_TOKEN = os.getenv('apibotkey')
@@ -36,16 +37,20 @@ conn.commit()
 @dp.message_handler(commands=["newtask"])
 async def new_task(message: types.Message):
     try:
-        match = re.match(r"(.+) @([\w]+) -(\d{4}-\d{2}-\d{2})", message.text[9:].strip())
-        if not match:
-            await message.reply("Используйте формат: описание @user -YYYY-MM-DD")
-            return
+        # Используем регулярное выражение для разбора команды
+        match = re.match(r"^([\w\s]+) @(\w+) -([\d-]+)$", message.text)
         
+        if not match:
+            await message.reply("⚠️ Неверный формат! Используйте: -описание @исполнитель -срок")
+            return
+
         task_text, user_id, deadline = match.groups()
+
         cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-                       (message.chat.id, user_id, task_text, deadline))
+                       (message.chat.id, user_id, task_text.strip(), deadline.strip()))
         conn.commit()
-        await message.reply(f"✅ Задача добавлена для @{user_id} (до {deadline})")
+
+        await message.reply(f"✅ Задача добавлена: {task_text.strip()} для @{user_id} (до {deadline.strip()})")
     except Exception as e:
         await message.reply("Ошибка при добавлении задачи")
 
