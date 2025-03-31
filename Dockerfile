@@ -1,14 +1,14 @@
+# Используем официальный образ Python
 FROM python:3.9-slim
 
-# Установка зависимостей для сборки
-RUN apt-get update && apt-get install -y build-essential python3-dev
+# Устанавливаем рабочую директорию
+WORKDIR /app
 
-# Установка зависимостей проекта
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
-
-# Копирование исходных кодов
+# Копируем файлы проекта в контейнер
 COPY . /app
 
-WORKDIR /app
+# Устанавливаем зависимости
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Запускаем бота
 CMD ["python", "bot.py"]
