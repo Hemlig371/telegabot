@@ -36,14 +36,12 @@ conn.commit()
 @dp.message_handler(commands=["newtask"])
 async def new_task(message: types.Message):
     try:
-        args = message.text.split()
-        if "@" not in args[1]:
-            await message.reply("Укажите исполнителя через @")
+        match = re.match(r"(.+) @([\w]+) -(\d{4}-\d{2}-\d{2})", message.text[9:].strip())
+        if not match:
+            await message.reply("Используйте формат: описание @user -YYYY-MM-DD")
             return
-        user_id = args[1].replace("@", "")
-        task_text = " ".join(args[2:-2])
-        deadline = args[-1] if len(args) > 2 else "Не указан"
-
+        
+        task_text, user_id, deadline = match.groups()
         cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
                        (message.chat.id, user_id, task_text, deadline))
         conn.commit()
@@ -74,6 +72,18 @@ async def list_tasks(message: types.Message):
     result = "\n".join([f"[{t[0]}] @{t[1]}: {t[2]} (Статус: {t[3]}, Дедлайн: {t[4]})" for t in tasks])
     await message.reply(result)
 
+# Команда помощи
+@dp.message_handler(commands=["help"])
+async def help_command(message: types.Message):
+    help_text = (
+        "📌 Список доступных команд:\n"
+        "/newtask @исполнитель описание дедлайн - Добавить новую задачу\n"
+        "/status ID статус - Изменить статус задачи\n"
+        "/tasks - Просмотреть список задач\n"
+        "/help - Показать список команд"
+    )
+    await message.reply(help_text)
+  
 # Функция напоминаний о задачах
 async def check_deadlines():
     while True:
