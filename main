@@ -7,7 +7,7 @@ from aiogram.utils import executor
 from datetime import datetime, timedelta
 
 # Укажите токен бота
-API_TOKEN = "YOUR_BOT_TOKEN"
+API_TOKEN = apibotkey
 
 # Включаем логирование
 logging.basicConfig(level=logging.INFO)
