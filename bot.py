@@ -84,22 +84,25 @@ async def check_deadlines():
             await bot.send_message(task[1], f"⏳ Напоминание о задаче {task[0]}: {task[2]}")
         await asyncio.sleep(3600)  # Проверка раз в час
 
-# Запуск бота
-if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(check_deadlines())
-    executor.start_polling(dp, skip_updates=True)
-
-
-#HealthCheck
-
+# Health check для Koyeb
 async def health_check(request):
     return web.Response(text="OK")
 
-app = web.Application()
-app.router.add_get('/health', health_check)
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/health', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8000)  # Запускаем сервер на порту 8000
+    await site.start()
 
-if __name__ == '__main__':
-    # Запуск HTTP-сервера на порту 8000
-    web.run_app(app, port=8000)
+# Основная функция, запускающая и бота, и сервер
+async def main():
+    asyncio.create_task(check_deadlines())  # Фоновая задача для напоминаний
+    await asyncio.gather(
+        start_web_server(),  # HTTP-сервер для health check
+        dp.start_polling()   # Запуск бота
+    )
 
+if __name__ == "__main__":
+    asyncio.run(main())
