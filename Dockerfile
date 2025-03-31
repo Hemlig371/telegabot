@@ -7,8 +7,10 @@ WORKDIR /app
 # Копируем файлы в контейнер
 COPY . .
 
+# Обновляем pip до старой версии
+RUN pip install --upgrade pip==21.3.1
+
 # Устанавливаем зависимости
-RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Запускаем бота
