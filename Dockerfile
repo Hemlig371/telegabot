@@ -1,27 +1,14 @@
-# Используем образ Python
-FROM python:3.9
+FROM python:3.9-slim
 
-# Устанавливаем зависимости для сборки C-расширений
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libpq-dev \
-    python3-dev \
-    libc-dev \
-    build-essential \
-    libffi-dev \
-    libssl-dev \
-    libcurl4-openssl-dev \
-    libxml2-dev
+# Установка зависимостей для сборки
+RUN apt-get update && apt-get install -y build-essential python3-dev
 
-# Устанавливаем рабочую директорию
+# Установка зависимостей проекта
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Копирование исходных кодов
+COPY . /app
+
 WORKDIR /app
-
-# Копируем файлы в контейнер
-COPY . .
-
-# Устанавливаем pip и зависимости
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Запускаем бота
 CMD ["python", "bot.py"]
