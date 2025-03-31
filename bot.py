@@ -26,7 +26,6 @@ conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute('''CREATE TABLE IF NOT EXISTS tasks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    chat_id INTEGER,
                     user_id TEXT,
                     task_text TEXT,
                     status TEXT DEFAULT 'новая',
@@ -55,7 +54,7 @@ async def new_task(message: types.Message):
 # Команда для изменения статуса
 @dp.message_handler(commands=["status"])
 async def change_status(message: types.Message):
-    args = message.text.split()
+    args = re.match(r"^/status -([\w\s\d.,!?]+)", message.text)
     if len(args) < 3:
         await message.reply("Используйте: /status ID (новая/в работе/исполнено)")
         return
@@ -67,7 +66,7 @@ async def change_status(message: types.Message):
 # Команда для просмотра задач
 @dp.message_handler(commands=["tasks"])
 async def list_tasks(message: types.Message):
-    cursor.execute("SELECT id, user_id, task_text, status, deadline FROM tasks WHERE chat_id=?", (message.chat.id,))
+    cursor.execute("SELECT id, user_id, task_text, status, deadline FROM tasks")
     tasks = cursor.fetchall()
     if not tasks:
         await message.reply("Задач нет")
