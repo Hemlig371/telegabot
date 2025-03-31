@@ -5,9 +5,10 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import ParseMode
 from aiogram.utils import executor
 from datetime import datetime, timedelta
+import os
 
 # Укажите токен бота
-API_TOKEN = apibotkey
+API_TOKEN = os.getenv('apibotkey')
 
 # Включаем логирование
 logging.basicConfig(level=logging.INFO)
@@ -17,7 +18,9 @@ bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot)
 
 # Подключение к базе данных
-conn = sqlite3.connect("tasks.db")
+db_path = os.path.join(os.getcwd(), "tasks.db")
+conn = sqlite3.connect(db_path)
+
 cursor = conn.cursor()
 cursor.execute('''CREATE TABLE IF NOT EXISTS tasks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
