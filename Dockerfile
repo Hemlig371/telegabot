@@ -1,6 +1,9 @@
 # Используем официальный образ Python
 FROM python:3.9-slim
 
+# Устанавливаем зависимости для сборки aiohttp
+RUN apt-get update && apt-get install -y gcc libpq-dev python3-dev
+
 # Устанавливаем рабочую директорию
 WORKDIR /app
 
