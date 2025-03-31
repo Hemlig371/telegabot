@@ -33,28 +33,28 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS tasks (
                     deadline TEXT)''')
 conn.commit()
 
-# Команда для создания задачи
 @dp.message_handler(commands=["newtask"])
 async def new_task(message: types.Message):
     try:
         # Используем регулярное выражение для разбора команды
-        match = re.match(r"^-([\w\s]+) @(\w+) -([\d-]+)$", message.text)
-        
+        match = re.match(r"^-([\w\s\d.,!?]+) @([\w\d_]+) -([\d-]+)$", message.text)
+
         if not match:
             await message.reply("⚠️ Неверный формат! Используйте: -описание @исполнитель -срок")
             return
 
         task_text, user_id, deadline = match.groups()
-    try:
-      cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-                   (message.chat.id, user_id, task_text.strip(), deadline.strip()))
-    conn.commit()
-    except sqlite3.Error as e:
-        await message.reply(f"⚠ Ошибка базы данных: {str(e)}")
 
-        await message.reply(f"✅ Задача добавлена: {task_text.strip()} для @{user_id} (до {deadline.strip()})")
+        try:
+            cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
+                           (message.chat.id, user_id, task_text.strip(), deadline.strip()))
+            conn.commit()
+            await message.reply(f"✅ Задача добавлена: {task_text.strip()} для @{user_id} (до {deadline.strip()})")
+        except sqlite3.Error as e:
+            await message.reply(f"⚠ Ошибка базы данных: {str(e)}")
+
     except Exception as e:
-        await message.reply("Ошибка при добавлении задачи")
+        await message.reply(f"Ошибка при добавлении задачи: {str(e)}")
 
 # Команда для изменения статуса
 @dp.message_handler(commands=["status"])
