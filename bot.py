@@ -111,11 +111,12 @@ async def process_deadline(message: types.Message, state: FSMContext):
 
     await state.finish()
 
+# Команда "Изменить статус"
 @dp.message_handler(lambda message: message.text == "🔄 Изменить статус")
 async def status_select_task(message: types.Message):
-    cursor.execute("SELECT id, task_text FROM tasks WHERE chat_id=?", (message.chat.id,))
+    cursor.execute("SELECT id, task_text FROM tasks")
     tasks = cursor.fetchall()
-    
+
     if not tasks:
         await message.reply("📭 У вас нет активных задач.")
         return
@@ -123,21 +124,24 @@ async def status_select_task(message: types.Message):
     keyboard = InlineKeyboardMarkup()
     for task in tasks:
         keyboard.add(InlineKeyboardButton(f"📌 {task[1]} (ID: {task[0]})", callback_data=f"change_status_{task[0]}"))
-    
+
     await message.reply("Выберите задачу для изменения статуса:", reply_markup=keyboard)
 
+# Выбор нового статуса
 @dp.callback_query_handler(lambda c: c.data.startswith("change_status_"))
 async def select_new_status(callback_query: types.CallbackQuery):
-    task_id = callback_query.data.split("_")[2]
+    task_id = callback_query.data.split("_")[1]  # Исправлено
 
     keyboard = InlineKeyboardMarkup(row_width=2)
     statuses = ["новая", "в работе", "исполнено"]
     
-    for status in statuses:
-        keyboard.add(InlineKeyboardButton(status, callback_data=f"set_status_{task_id}_{status}"))
+    # Разбиваем кнопки по рядам
+    buttons = [InlineKeyboardButton(status, callback_data=f"set_status_{task_id}_{status}") for status in statuses]
+    keyboard.add(*buttons)
 
-    await bot.send_message(callback_query.from_user.id, "Выберите новый статус:", reply_markup=keyboard)
+    await callback_query.message.reply("🔄 Выберите новый статус:", reply_markup=keyboard)
 
+# Установка нового статуса
 @dp.callback_query_handler(lambda c: c.data.startswith("set_status_"))
 async def set_status(callback_query: types.CallbackQuery):
     _, task_id, new_status = callback_query.data.split("_")
@@ -145,7 +149,7 @@ async def set_status(callback_query: types.CallbackQuery):
     cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status, task_id))
     conn.commit()
 
-    await bot.send_message(callback_query.from_user.id, f"✅ Статус задачи {task_id} обновлён: {new_status}")
+    await callback_query.message.reply(f"✅ Статус задачи {task_id} обновлён: {new_status}")
 
 
 @dp.message_handler(commands=["start"])
