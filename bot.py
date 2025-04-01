@@ -51,36 +51,59 @@ menu_keyboard.add(
     KeyboardButton("❓ Помощь"),
 )
 
+# Хранение состояний в памяти
 dp = Dispatcher(bot, storage=MemoryStorage())
+
+# Определяем состояния
 class TaskCreation(StatesGroup):
     waiting_for_title = State()
     waiting_for_executor = State()
     waiting_for_deadline = State()
 
+# Начало создания задачи
 @dp.message_handler(lambda message: message.text == "➕ Новая задача")
 async def new_task_start(message: types.Message):
     await message.reply("📌 Введите название задачи:")
     await TaskCreation.waiting_for_title.set()
+
+# Получение названия
 @dp.message_handler(state=TaskCreation.waiting_for_title)
 async def process_title(message: types.Message, state: FSMContext):
     await state.update_data(title=message.text)
     await message.reply("👤 Введите исполнителя (@username):")
     await TaskCreation.waiting_for_executor.set()
+
+# Получение исполнителя
+@dp.message_handler(state=TaskCreation.waiting_for_executor)
+async def process_executor(message: types.Message, state: FSMContext):
+    executor = message.text.strip()
+
+    # Проверка корректности исполнителя
+    if not re.match(r"^@\w+$", executor):
+        await message.reply("⚠ Ошибка! Введите исполнителя в формате @username\nПример: @example_user")
+        return
+
+    await state.update_data(executor=executor)
+    await message.reply("⏳ Введите дедлайн (YYYY-MM-DD):")
+    await TaskCreation.waiting_for_deadline.set()
+
+# Получение дедлайна и сохранение в БД
 @dp.message_handler(state=TaskCreation.waiting_for_deadline)
 async def process_deadline(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     
     task_text = user_data['title']
-    user_id = user_data['executor']
+    executor = user_data['executor']
     deadline = message.text.strip()
+
     try:
         cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-                       (message.chat.id, user_id, task_text, deadline))
+                       (message.chat.id, executor, task_text, deadline))
         conn.commit()
 
         await message.reply(f"✅ Задача создана!\n\n"
                             f"📌 <b>{task_text}</b>\n"
-                            f"👤 Исполнитель: {user_id}\n"
+                            f"👤 Исполнитель: {executor}\n"
                             f"⏳ Дедлайн: {deadline}",
                             parse_mode=ParseMode.HTML)
     except sqlite3.Error as e:
