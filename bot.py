@@ -84,37 +84,50 @@ async def process_executor(message: types.Message, state: FSMContext):
         return
 
     await state.update_data(executor=executor)
-    await message.reply("⏳ Введите дедлайн (YYYY-MM-DD):")
+
+    # Формируем inline-клавиатуру с датами
+    today = datetime.today()
+    dates = {
+        "Сегодня": today.strftime("%Y-%m-%d"),
+        "Завтра": (today + timedelta(days=1)).strftime("%Y-%m-%d"),
+        "Послезавтра": (today + timedelta(days=2)).strftime("%Y-%m-%d"),
+    }
+    
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    for label, date in dates.items():
+        keyboard.add(InlineKeyboardButton(label, callback_data=f"set_deadline_{date}"))
+
+    await message.reply("⏳ Выберите дедлайн:", reply_markup=keyboard)
     await TaskCreation.waiting_for_deadline.set()
 
-# Получение дедлайна и сохранение в БД
-@dp.message_handler(state=TaskCreation.waiting_for_deadline)
-async def process_deadline(message: types.Message, state: FSMContext):
+# Обработка выбора дедлайна
+@dp.callback_query_handler(lambda c: c.data.startswith("set_deadline_"), state=TaskCreation.waiting_for_deadline)
+async def process_deadline(callback_query: types.CallbackQuery, state: FSMContext):
+    deadline = callback_query.data.split("_")[2]
+
     user_data = await state.get_data()
-    
     task_text = user_data['title']
     executor = user_data['executor']
-    deadline = message.text.strip()
 
     try:
         cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-                       (message.chat.id, executor, task_text, deadline))
+                       (callback_query.message.chat.id, executor, task_text, deadline))
         conn.commit()
 
-        await message.reply(f"✅ Задача создана!\n\n"
-                            f"📌 <b>{task_text}</b>\n"
-                            f"👤 Исполнитель: {executor}\n"
-                            f"⏳ Дедлайн: {deadline}",
-                            parse_mode=ParseMode.HTML)
+        await callback_query.message.reply(f"✅ Задача создана!\n\n"
+                                           f"📌 <b>{task_text}</b>\n"
+                                           f"👤 Исполнитель: {executor}\n"
+                                           f"⏳ Дедлайн: {deadline}",
+                                           parse_mode=ParseMode.HTML)
     except sqlite3.Error as e:
-        await message.reply(f"⚠ Ошибка базы данных: {str(e)}")
+        await callback_query.message.reply(f"⚠ Ошибка базы данных: {str(e)}")
 
     await state.finish()
 
 # Команда "Изменить статус"
 @dp.message_handler(lambda message: message.text == "🔄 Изменить статус")
 async def status_select_task(message: types.Message):
-    cursor.execute("SELECT id, task_text FROM tasks")
+    cursor.execute("SELECT id, task_text FROM tasks WHERE chat_id=?", (message.chat.id,))
     tasks = cursor.fetchall()
 
     if not tasks:
@@ -130,8 +143,9 @@ async def status_select_task(message: types.Message):
 # Выбор нового статуса
 @dp.callback_query_handler(lambda c: c.data.startswith("change_status_"))
 async def select_new_status(callback_query: types.CallbackQuery):
-    task_id = callback_query.data.split("_")[1]  # Исправлено
+    task_id = callback_query.data.split("_")[2]  # Исправлено на правильное извлечение ID задачи
 
+    # Клавиатура для выбора статуса
     keyboard = InlineKeyboardMarkup(row_width=2)
     statuses = ["новая", "в работе", "исполнено"]
     
@@ -139,7 +153,7 @@ async def select_new_status(callback_query: types.CallbackQuery):
     buttons = [InlineKeyboardButton(status, callback_data=f"set_status_{task_id}_{status}") for status in statuses]
     keyboard.add(*buttons)
 
-    await callback_query.message.reply("🔄 Выберите новый статус:", reply_markup=keyboard)
+    await bot.send_message(callback_query.from_user.id, "🔄 Выберите новый статус:", reply_markup=keyboard)
 
 # Установка нового статуса
 @dp.callback_query_handler(lambda c: c.data.startswith("set_status_"))
@@ -149,8 +163,7 @@ async def set_status(callback_query: types.CallbackQuery):
     cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status, task_id))
     conn.commit()
 
-    await callback_query.message.reply(f"✅ Статус задачи {task_id} обновлён: {new_status}")
-
+    await callback_query.message.reply(f"✅ Статус задачи {task_id} обновлён на: {new_status}")
 
 @dp.message_handler(commands=["start"])
 async def start_command(message: types.Message):
