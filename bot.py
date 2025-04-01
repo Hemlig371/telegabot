@@ -47,7 +47,7 @@ menu_keyboard.add(
 )
 
 menu_keyboard.add(
-    KeyboardButton("📋 Мои задачи"),
+    KeyboardButton("📋 Список задач"),
     KeyboardButton("❓ Помощь"),
 )
 
@@ -85,7 +85,9 @@ async def process_executor(message: types.Message, state: FSMContext):
 
     await state.update_data(executor=executor)
 
-    # Формируем inline-клавиатуру с датами
+# Формируем inline-клавиатуру с датами и кнопкой для ввода своего срока
+@dp.message_handler(state=TaskCreation.waiting_for_deadline)
+async def deadline_select(message: types.Message, state: FSMContext):
     today = datetime.today()
     dates = {
         "Сегодня": today.strftime("%Y-%m-%d"),
@@ -93,37 +95,74 @@ async def process_executor(message: types.Message, state: FSMContext):
         "Послезавтра": (today + timedelta(days=2)).strftime("%Y-%m-%d"),
     }
     
+    # Клавиатура для выбора даты
     keyboard = InlineKeyboardMarkup(row_width=1)
     for label, date in dates.items():
         keyboard.add(InlineKeyboardButton(label, callback_data=f"set_deadline_{date}"))
+    
+    # Добавляем кнопку для ввода своего срока
+    keyboard.add(InlineKeyboardButton("Свой срок", callback_data="set_deadline_custom"))
 
-    await message.reply("⏳ Выберите дедлайн:", reply_markup=keyboard)
+    await message.reply("⏳ Выберите срок или введите свой:", reply_markup=keyboard)
     await TaskCreation.waiting_for_deadline.set()
 
-# Обработка выбора дедлайна
+# Обработка выбора дедлайна (предустановленные даты)
 @dp.callback_query_handler(lambda c: c.data.startswith("set_deadline_"), state=TaskCreation.waiting_for_deadline)
 async def process_deadline(callback_query: types.CallbackQuery, state: FSMContext):
-    deadline = callback_query.data.split("_")[2]
+    if callback_query.data == "set_deadline_custom":
+        await callback_query.message.reply("⏳ Введите свой срок в формате YYYY-MM-DD:")
+        await TaskCreation.waiting_for_deadline.set()  # Переходим в состояние ожидания ввода даты
+    else:
+        deadline = callback_query.data.split("_")[2]
 
-    user_data = await state.get_data()
-    task_text = user_data['title']
-    executor = user_data['executor']
+        user_data = await state.get_data()
+        task_text = user_data['title']
+        executor = user_data['executor']
 
+        try:
+            cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
+                           (callback_query.message.chat.id, executor, task_text, deadline))
+            conn.commit()
+
+            await callback_query.message.reply(f"✅ Задача создана!\n\n"
+                                               f"📌 <b>{task_text}</b>\n"
+                                               f"👤 {executor}\n"
+                                               f"⏳ {deadline}",
+                                               parse_mode=ParseMode.HTML)
+        except sqlite3.Error as e:
+            await callback_query.message.reply(f"⚠ Ошибка базы данных: {str(e)}")
+
+        await state.finish()
+
+# Обработка ввода собственного срока
+@dp.message_handler(state=TaskCreation.waiting_for_deadline)
+async def process_custom_deadline(message: types.Message, state: FSMContext):
+    # Проверка правильности введенной даты (формат YYYY-MM-DD)
     try:
-        cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-                       (callback_query.message.chat.id, executor, task_text, deadline))
-        conn.commit()
+        datetime.strptime(message.text, "%Y-%m-%d")  # Проверка формата
+        deadline = message.text.strip()
 
-        await callback_query.message.reply(f"✅ Задача создана!\n\n"
-                                           f"📌 <b>{task_text}</b>\n"
-                                           f"👤 Исполнитель: {executor}\n"
-                                           f"⏳ Дедлайн: {deadline}",
-                                           parse_mode=ParseMode.HTML)
-    except sqlite3.Error as e:
-        await callback_query.message.reply(f"⚠ Ошибка базы данных: {str(e)}")
+        user_data = await state.get_data()
+        task_text = user_data['title']
+        executor = user_data['executor']
 
-    await state.finish()
+        try:
+            cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
+                           (message.chat.id, executor, task_text, deadline))
+            conn.commit()
 
+            await message.reply(f"✅ Задача создана!\n\n"
+                                f"📌 <b>{task_text}</b>\n"
+                                f"👤 {executor}\n"
+                                f"⏳ {deadline}",
+                                parse_mode=ParseMode.HTML)
+        except sqlite3.Error as e:
+            await message.reply(f"⚠ Ошибка базы данных: {str(e)}")
+
+        await state.finish()
+    except ValueError:
+        await message.reply("⚠ Ошибка! Введите дату в формате YYYY-MM-DD.")
+      
 # Команда "Изменить статус"
 @dp.message_handler(lambda message: message.text == "🔄 Изменить статус")
 async def status_select_task(message: types.Message):
