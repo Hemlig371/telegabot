@@ -397,30 +397,39 @@ async def export_tasks_to_csv(message: types.Message):
             await message.reply("📭 В базе нет задач для экспорта.")
             return
 
-        # Создаем CSV в памяти с кодировкой win1251
-        output = io.BytesIO()  # Используем BytesIO вместо StringIO
-        writer = csv.writer(io.TextIOWrapper(output, encoding='windows-1251', newline=''))
+        # Создаем CSV в памяти
+        output = io.BytesIO()
+        
+        # Используем TextIOWrapper с нужной кодировкой
+        text_buffer = io.TextIOWrapper(
+            output,
+            encoding='windows-1251',
+            errors='replace',  # заменяем некодируемые символы
+            newline=''
+        )
+        
+        writer = csv.writer(text_buffer)
         
         # Заголовки столбцов
-        writer.writerow(['ID', 'User ID', 'Chat ID', 'Task Text', 'Status', 'Deadline'])
+        headers = ['ID', 'User ID', 'Chat ID', 'Task Text', 'Status', 'Deadline']
+        writer.writerow(headers)
         
         # Данные
         for task in tasks:
-            # Преобразуем все данные в строки и кодируем в win1251
-            encoded_task = [
-                str(item).encode('windows-1251', errors='replace').decode('windows-1251') 
-                if item is not None else ''
+            # Преобразуем все значения в строки
+            row = [
+                str(item) if item is not None else ''
                 for item in task
             ]
-            writer.writerow(encoded_task)
+            writer.writerow(row)
         
-        # Сбрасываем буфер записи
-        writer.writerow([])
-        output.flush()
+        # Важно: закрыть TextIOWrapper перед использованием буфера
+        text_buffer.flush()
+        text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
         output.seek(0)
         
         # Создаем временный файл
-        csv_file = InputFile(output, filename="tasks_export_win1251.csv")
+        csv_file = InputFile(output, filename="tasks_export.csv")
         
         await message.reply_document(
             document=csv_file,
@@ -428,8 +437,8 @@ async def export_tasks_to_csv(message: types.Message):
         )
         
     except Exception as e:
-        logger.error(f"Ошибка при экспорте задач: {e}")
-        await message.reply("⚠ Ошибка при создании файла экспорта.")
+        logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
+        await message.reply(f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
 # УДАЛЕНИЕ ЗАДАЧ
