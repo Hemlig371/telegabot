@@ -35,9 +35,9 @@ conn.commit()
 
 async def set_bot_commands():
     commands = [
-        BotCommand(command="newtask", description="➕ Добавить задачу"),
-        BotCommand(command="status", description="🔄 Изменить статус"),
-        BotCommand(command="tasks", description="📋 Посмотреть задачи"),
+        BotCommand(command="n", description="➕ Добавить задачу"),
+        BotCommand(command="s", description="🔄 Изменить статус"),
+        BotCommand(command="t", description="📋 Посмотреть задачи"),
         BotCommand(command="help", description="❓ Помощь"),
     ]
     await bot.set_my_commands(commands)
@@ -123,6 +123,7 @@ async def start_web_server():
 
 # Основная функция, запускающая и бота, и сервер
 async def main():
+    await set_bot_commands()  # Устанавливаем меню команд
     asyncio.create_task(check_deadlines())  # Фоновая задача для напоминаний
     await asyncio.gather(
         start_web_server(),  # HTTP-сервер для health check
