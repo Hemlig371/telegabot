@@ -265,26 +265,26 @@ async def select_new_status(callback_query: types.CallbackQuery):
 async def set_status(callback_query: types.CallbackQuery):
     """Установка нового статуса задачи"""
     try:
-        # Разбираем callback data
-        parts = callback_query.data.split("_")
-        if len(parts) != 3:
-            raise ValueError("Неверный формат callback данных")
-            
-        task_id = parts[1]
-        new_status = parts[2]
+        # Правильно разбираем callback data
+        *_, task_id, new_status = callback_query.data.split('_')
         
         await bot.answer_callback_query(callback_query.id)
         
         # Проверяем существование задачи
         cursor = conn.cursor()
-        cursor.execute("SELECT task_text, status FROM tasks WHERE id=?", (task_id,))
+        cursor.execute("SELECT task_text, status, chat_id FROM tasks WHERE id=?", (task_id,))
         task = cursor.fetchone()
         
         if not task:
             await callback_query.message.reply("⚠ Задача не найдена!")
             return
             
-        old_text, old_status = task
+        old_text, old_status, chat_id = task
+        
+        # Дополнительная проверка, что задача принадлежит пользователю
+        if str(chat_id) != str(callback_query.message.chat.id):
+            await callback_query.message.reply("⚠ Вы не можете изменить эту задачу!")
+            return
         
         # Обновляем статус
         cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status, task_id))
@@ -298,9 +298,12 @@ async def set_status(callback_query: types.CallbackQuery):
             f"🔄 Было: {old_status} → Стало: {new_status}"
         )
         
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка базы данных при обновлении статуса: {str(e)}")
+        await callback_query.message.reply("⚠ Ошибка базы данных. Попробуйте снова.")
     except Exception as e:
-        logger.error(f"Ошибка при обновлении статуса: {str(e)}")
-        await callback_query.message.reply("⚠ Ошибка при обновлении статуса. Попробуйте снова.")
+        logger.error(f"Неожиданная ошибка при обновлении статуса: {str(e)}")
+        await callback_query.message.reply("⚠ Не удалось обновить статус. Попробуйте снова.")
 
 # ======================
 # РАБОТА С ЗАДАЧАМИ
@@ -384,7 +387,7 @@ async def list_tasks(message: types.Message):
 
 @dp.message_handler(lambda message: message.text == "📤 Экспорт задач")
 async def export_tasks_to_csv(message: types.Message):
-    """Экспорт всех задач в CSV файл"""
+    """Экспорт всех задач в CSV файл с кодировкой win1251"""
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM tasks")
@@ -394,26 +397,34 @@ async def export_tasks_to_csv(message: types.Message):
             await message.reply("📭 В базе нет задач для экспорта.")
             return
 
-        # Создаем CSV в памяти
-        output = io.StringIO()
-        writer = csv.writer(output)
+        # Создаем CSV в памяти с кодировкой win1251
+        output = io.BytesIO()  # Используем BytesIO вместо StringIO
+        writer = csv.writer(io.TextIOWrapper(output, encoding='windows-1251', newline=''))
         
         # Заголовки столбцов
         writer.writerow(['ID', 'User ID', 'Chat ID', 'Task Text', 'Status', 'Deadline'])
         
         # Данные
         for task in tasks:
-            writer.writerow(task)
+            # Преобразуем все данные в строки и кодируем в win1251
+            encoded_task = [
+                str(item).encode('windows-1251', errors='replace').decode('windows-1251') 
+                if item is not None else ''
+                for item in task
+            ]
+            writer.writerow(encoded_task)
         
-        # Перемещаем указатель в начало
+        # Сбрасываем буфер записи
+        writer.writerow([])
+        output.flush()
         output.seek(0)
         
         # Создаем временный файл
-        csv_file = InputFile(io.BytesIO(output.getvalue().encode()), filename="tasks_export.csv")
+        csv_file = InputFile(output, filename="tasks_export_win1251.csv")
         
         await message.reply_document(
             document=csv_file,
-            caption="📊 Экспорт всех задач в CSV"
+            caption="📊 Экспорт всех задач в CSV (Windows-1251)"
         )
         
     except Exception as e:
