@@ -213,78 +213,94 @@ async def status_select_task(message: types.Message):
     """Выбор задачи для изменения статуса"""
     try:
         cursor = conn.cursor()
-        # Добавляем фильтрацию по chat_id, чтобы пользователь видел только свои задачи
-        cursor.execute("SELECT id, task_text FROM tasks")
+        # Важно фильтровать по chat_id, чтобы пользователь видел только свои задачи
+        cursor.execute("SELECT id, task_text, status FROM tasks WHERE chat_id=?", (message.chat.id,))
         tasks = cursor.fetchall()
 
         if not tasks:
             await message.reply("📭 У вас нет активных задач.")
             return
 
-        keyboard = InlineKeyboardMarkup()
-        for task_id, task_text in tasks:
-            # Упрощаем текст кнопки для лучшей читаемости
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        for task_id, task_text, status in tasks:
             keyboard.add(InlineKeyboardButton(
-                f"{task_text[:20]}... (ID: {task_id})", 
+                f"{task_text[:30]}... (ID: {task_id}, статус: {status})", 
                 callback_data=f"change_status_{task_id}"
             ))
 
         await message.reply("Выберите задачу для изменения статуса:", reply_markup=keyboard)
-    except sqlite3.Error as e:
-        logger.error(f"Ошибка БД при получении задач: {e}")
-        await message.reply("⚠ Ошибка при получении списка задач.")
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка задач: {str(e)}")
+        await message.reply("⚠ Ошибка при получении списка задач. Попробуйте позже.")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("change_status_"))
 async def select_new_status(callback_query: types.CallbackQuery):
     """Выбор нового статуса для задачи"""
     try:
         task_id = callback_query.data.split("_")[2]
-        await bot.answer_callback_query(callback_query.id)  # Убираем "часики" у кнопки
+        await bot.answer_callback_query(callback_query.id)
         
-        # Получаем текущий статус задачи для информации
+        # Получаем текущий статус задачи
         cursor = conn.cursor()
-        cursor.execute("SELECT status FROM tasks WHERE id=?", (task_id,))
-        current_status = cursor.fetchone()[0]
+        cursor.execute("SELECT task_text, status FROM tasks WHERE id=?", (task_id,))
+        task = cursor.fetchone()
+        
+        if not task:
+            await callback_query.message.reply("⚠ Задача не найдена!")
+            return
+            
+        task_text, current_status = task
         
         await callback_query.message.reply(
+            f"Задача: {task_text[:100]}{'...' if len(task_text) > 100 else ''}\n"
             f"Текущий статус: {current_status}\n"
-            "🔄 Выберите новый статус:",
+            "Выберите новый статус:",
             reply_markup=get_status_keyboard(task_id)
         )
     except Exception as e:
-        logger.error(f"Ошибка при выборе статуса: {e}")
-        await callback_query.message.reply("⚠ Ошибка при изменении статуса.")
+        logger.error(f"Ошибка при выборе статуса: {str(e)}")
+        await callback_query.message.reply("⚠ Ошибка при выборе задачи. Попробуйте снова.")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("set_status_"))
 async def set_status(callback_query: types.CallbackQuery):
     """Установка нового статуса задачи"""
     try:
-        _, task_id, new_status = callback_query.data.split("_")
-        await bot.answer_callback_query(callback_query.id)  # Убираем "часики" у кнопки
+        # Разбираем callback data
+        parts = callback_query.data.split("_")
+        if len(parts) != 3:
+            raise ValueError("Неверный формат callback данных")
+            
+        task_id = parts[1]
+        new_status = parts[2]
         
+        await bot.answer_callback_query(callback_query.id)
+        
+        # Проверяем существование задачи
         cursor = conn.cursor()
-        # Проверяем, существует ли задача
-        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
-        if not cursor.fetchone():
+        cursor.execute("SELECT task_text, status FROM tasks WHERE id=?", (task_id,))
+        task = cursor.fetchone()
+        
+        if not task:
             await callback_query.message.reply("⚠ Задача не найдена!")
             return
             
+        old_text, old_status = task
+        
+        # Обновляем статус
         cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status, task_id))
         conn.commit()
         
-        # Получаем обновленную информацию о задаче
-        cursor.execute("SELECT task_text FROM tasks WHERE id=?", (task_id,))
-        task_text = cursor.fetchone()[0]
-        
+        # Отправляем подтверждение
         await callback_query.message.reply(
-            f"✅ Статус задачи обновлён:\n"
-            f"📌 {task_text[:50]}...\n"
+            f"✅ Статус задачи обновлён!\n\n"
+            f"📌 Задача: {old_text[:100]}{'...' if len(old_text) > 100 else ''}\n"
             f"🆔 ID: {task_id}\n"
-            f"🔄 Новый статус: {new_status}"
+            f"🔄 Было: {old_status} → Стало: {new_status}"
         )
+        
     except Exception as e:
-        logger.error(f"Ошибка при установке статуса: {e}")
-        await callback_query.message.reply("⚠ Ошибка при обновлении статуса.")
+        logger.error(f"Ошибка при обновлении статуса: {str(e)}")
+        await callback_query.message.reply("⚠ Ошибка при обновлении статуса. Попробуйте снова.")
 
 # ======================
 # РАБОТА С ЗАДАЧАМИ
@@ -407,9 +423,6 @@ async def export_tasks_to_csv(message: types.Message):
 # ======================
 # УДАЛЕНИЕ ЗАДАЧ
 # ======================
-
-# Добавляем кнопку удаления в меню
-menu_keyboard.row(KeyboardButton("🗑 Удалить задачу"))
 
 class TaskDeletion(StatesGroup):
     waiting_for_task_selection = State()
