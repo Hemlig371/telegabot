@@ -10,6 +10,10 @@ from aiohttp import web
 import re
 from aiogram.types import BotCommand
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.dispatcher import FSMContext
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Укажите токен бота
 API_TOKEN = os.getenv('apibotkey')
@@ -34,19 +38,92 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS tasks (
                     deadline TEXT)''')
 conn.commit()
 
-async def set_bot_commands():
-    commands = [
-        BotCommand(command="n", description="➕ Добавить задачу"),
-        BotCommand(command="s", description="🔄 Изменить статус"),
-        BotCommand(command="t", description="📋 Посмотреть задачи"),
-        BotCommand(command="help", description="❓ Помощь"),
-    ]
-    await bot.set_my_commands(commands)
-
+# Кнопочное меню
 menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-menu_keyboard.add(KeyboardButton("/n"))
-menu_keyboard.add(KeyboardButton("/s"), KeyboardButton("/t"))
-menu_keyboard.add(KeyboardButton("/help"))
+
+menu_keyboard.add(
+    KeyboardButton("➕ Новая задача"),
+    KeyboardButton("🔄 Изменить статус"),
+)
+
+menu_keyboard.add(
+    KeyboardButton("📋 Мои задачи"),
+    KeyboardButton("❓ Помощь"),
+)
+
+dp = Dispatcher(bot, storage=MemoryStorage())
+class TaskCreation(StatesGroup):
+    waiting_for_title = State()
+    waiting_for_executor = State()
+    waiting_for_deadline = State()
+
+@dp.message_handler(lambda message: message.text == "➕ Новая задача")
+async def new_task_start(message: types.Message):
+    await message.reply("📌 Введите название задачи:")
+    await TaskCreation.waiting_for_title.set()
+@dp.message_handler(state=TaskCreation.waiting_for_title)
+async def process_title(message: types.Message, state: FSMContext):
+    await state.update_data(title=message.text)
+    await message.reply("👤 Введите исполнителя (@username):")
+    await TaskCreation.waiting_for_executor.set()
+@dp.message_handler(state=TaskCreation.waiting_for_deadline)
+async def process_deadline(message: types.Message, state: FSMContext):
+    user_data = await state.get_data()
+    
+    task_text = user_data['title']
+    user_id = user_data['executor']
+    deadline = message.text.strip()
+    try:
+        cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
+                       (message.chat.id, user_id, task_text, deadline))
+        conn.commit()
+
+        await message.reply(f"✅ Задача создана!\n\n"
+                            f"📌 <b>{task_text}</b>\n"
+                            f"👤 Исполнитель: {user_id}\n"
+                            f"⏳ Дедлайн: {deadline}",
+                            parse_mode=ParseMode.HTML)
+    except sqlite3.Error as e:
+        await message.reply(f"⚠ Ошибка базы данных: {str(e)}")
+
+    await state.finish()
+
+@dp.message_handler(lambda message: message.text == "🔄 Изменить статус")
+async def status_select_task(message: types.Message):
+    cursor.execute("SELECT id, task_text FROM tasks WHERE chat_id=?", (message.chat.id,))
+    tasks = cursor.fetchall()
+    
+    if not tasks:
+        await message.reply("📭 У вас нет активных задач.")
+        return
+
+    keyboard = InlineKeyboardMarkup()
+    for task in tasks:
+        keyboard.add(InlineKeyboardButton(f"📌 {task[1]} (ID: {task[0]})", callback_data=f"change_status_{task[0]}"))
+    
+    await message.reply("Выберите задачу для изменения статуса:", reply_markup=keyboard)
+
+@dp.callback_query_handler(lambda c: c.data.startswith("change_status_"))
+async def select_new_status(callback_query: types.CallbackQuery):
+    task_id = callback_query.data.split("_")[2]
+
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    statuses = ["новая", "в работе", "исполнено"]
+    
+    for status in statuses:
+        keyboard.add(InlineKeyboardButton(status, callback_data=f"set_status_{task_id}_{status}"))
+
+    await bot.send_message(callback_query.from_user.id, "Выберите новый статус:", reply_markup=keyboard)
+
+@dp.callback_query_handler(lambda c: c.data.startswith("set_status_"))
+async def set_status(callback_query: types.CallbackQuery):
+    _, task_id, new_status = callback_query.data.split("_")
+
+    cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status, task_id))
+    conn.commit()
+
+    await bot.send_message(callback_query.from_user.id, f"✅ Статус задачи {task_id} обновлён: {new_status}")
+
 
 @dp.message_handler(commands=["start"])
 async def start_command(message: types.Message):
@@ -133,7 +210,6 @@ async def start_web_server():
 
 # Основная функция, запускающая и бота, и сервер
 async def main():
-    await set_bot_commands()  # Устанавливаем меню команд
     asyncio.create_task(check_deadlines())  # Фоновая задача для напоминаний
     await asyncio.gather(
         start_web_server(),  # HTTP-сервер для health check
