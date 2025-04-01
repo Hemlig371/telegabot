@@ -1,100 +1,69 @@
 import sqlite3
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import ParseMode
-from aiogram.utils import executor
-from datetime import datetime, timedelta
 import os
-from aiohttp import web
 import re
-from aiogram.types import BotCommand
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.dispatcher import FSMContext
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
-from aiogram import types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.dispatcher import Dispatcher
+
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import (ParseMode, BotCommand, ReplyKeyboardMarkup, 
+                          KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton)
+from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.dispatcher.filters import Text
-import sqlite3
-import re
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.utils import executor
+from aiohttp import web
 
-# Укажите токен бота
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Конфигурация
 API_TOKEN = os.getenv('apibotkey')
-
-# Включаем логирование
-logging.basicConfig(level=logging.INFO)
+DB_PATH = "/bd1/tasks.db"
 
 # Инициализация бота и диспетчера
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher(bot)
-
-# Подключение к базе данных
-DB_PATH = "/bd1/tasks.db"
-conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-
-cursor = conn.cursor()
-cursor.execute('''CREATE TABLE IF NOT EXISTS tasks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id TEXT,
-                    task_text TEXT,
-                    status TEXT DEFAULT 'новая',
-                    deadline TEXT)''')
-conn.commit()
-
-# Кнопочное меню
-menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-
-menu_keyboard.add(
-    KeyboardButton("➕ Новая задача"),
-    KeyboardButton("🔄 Изменить статус"),
-)
-
-menu_keyboard.add(
-    KeyboardButton("📋 Список задач"),
-    KeyboardButton("❓ Помощь"),
-)
-
-# Хранение состояний в памяти
 dp = Dispatcher(bot, storage=MemoryStorage())
 
-# Определяем состояния
-class TaskCreation(StatesGroup):
-    waiting_for_title = State()
-    waiting_for_executor = State()
-    waiting_for_deadline = State()
+# Инициализация базы данных
+def init_db():
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        
+        cursor.execute('''CREATE TABLE IF NOT EXISTS tasks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER,
+                        chat_id INTEGER,
+                        task_text TEXT,
+                        status TEXT DEFAULT 'новая',
+                        deadline TEXT)''')
+        conn.commit()
+        return conn
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка при инициализации БД: {e}")
+        raise
 
-# Начало создания задачи
-@dp.message_handler(lambda message: message.text == "➕ Новая задача")
-async def new_task_start(message: types.Message):
-    await message.reply("📌 Введите название задачи:")
-    await TaskCreation.waiting_for_title.set()
+conn = init_db()
 
-# Получение названия
-@dp.message_handler(state=TaskCreation.waiting_for_title)
-async def process_title(message: types.Message, state: FSMContext):
-    await state.update_data(title=message.text)
-    await message.reply("👤 Введите исполнителя (@username):")
-    await TaskCreation.waiting_for_executor.set()
+# ======================
+# КЛАВИАТУРЫ И ИНТЕРФЕЙС
+# ======================
 
-# Получение исполнителя
-@dp.message_handler(state=TaskCreation.waiting_for_executor)
-async def process_executor(message: types.Message, state: FSMContext):
-    executor = message.text.strip()
+# Главное меню
+menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+menu_keyboard.row(
+    KeyboardButton("➕ Новая задача"),
+    KeyboardButton("🔄 Изменить статус"),
+    KeyboardButton("📋 Список задач"),
+)
 
-    # Проверка корректности исполнителя
-    if not re.match(r"^@\w+$", executor):
-        await message.reply("⚠ Ошибка! Введите исполнителя в формате @username\nПример: @example_user")
-        return
-
-    await state.update_data(executor=executor)
-
-    # Формируем inline-клавиатуру с датами и кнопкой для ввода своего срока
+# Клавиатура выбора даты
+def get_deadline_keyboard():
     today = datetime.today()
     dates = {
         "Сегодня": today.strftime("%Y-%m-%d"),
@@ -105,120 +74,190 @@ async def process_executor(message: types.Message, state: FSMContext):
     keyboard = InlineKeyboardMarkup(row_width=1)
     for label, date in dates.items():
         keyboard.add(InlineKeyboardButton(label, callback_data=f"set_deadline_{date}"))
-
-    # Добавляем кнопку для ввода своего срока
     keyboard.add(InlineKeyboardButton("Свой срок", callback_data="set_deadline_custom"))
+    return keyboard
 
-    await message.reply("⏳ Выберите срок или введите свой:", reply_markup=keyboard)
-    await TaskCreation.waiting_for_deadline.set()
-
-# Обработка выбора дедлайна (предустановленные даты)
-@dp.callback_query_handler(lambda c: c.data.startswith("set_deadline_"), state=TaskCreation.waiting_for_deadline)
-async def process_deadline(callback_query: types.CallbackQuery, state: FSMContext):
-    if callback_query.data == "set_deadline_custom":
-        await callback_query.message.reply("⏳ Введите свой срок в формате YYYY-MM-DD:")
-        await TaskCreation.waiting_for_deadline.set()  # Переходим в состояние ожидания ввода даты
-    else:
-        deadline = callback_query.data.split("_")[2]
-
-        user_data = await state.get_data()
-        task_text = user_data['title']
-        executor = user_data['executor']
-
-        try:
-            cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-                           (callback_query.message.chat.id, executor, task_text, deadline))
-            conn.commit()
-
-            await callback_query.message.reply(f"✅ Задача создана!\n\n"
-                                               f"📌 <b>{task_text}</b>\n"
-                                               f"👤 {executor}\n"
-                                               f"⏳ {deadline}",
-                                               parse_mode=ParseMode.HTML)
-        except sqlite3.Error as e:
-            await callback_query.message.reply(f"⚠ Ошибка базы данных: {str(e)}")
-
-        await state.finish()
-
-# Обработка ввода собственного срока
-@dp.message_handler(state=TaskCreation.waiting_for_deadline)
-async def process_custom_deadline(message: types.Message, state: FSMContext):
-    # Проверка правильности введенной даты (формат YYYY-MM-DD)
-    try:
-        datetime.strptime(message.text, "%Y-%m-%d")  # Проверка формата
-        deadline = message.text.strip()
-
-        user_data = await state.get_data()
-        task_text = user_data['title']
-        executor = user_data['executor']
-
-        try:
-            cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-                           (message.chat.id, executor, task_text, deadline))
-            conn.commit()
-
-            await message.reply(f"✅ Задача создана!\n\n"
-                                f"📌 <b>{task_text}</b>\n"
-                                f"👤 {executor}\n"
-                                f"⏳ {deadline}",
-                                parse_mode=ParseMode.HTML)
-        except sqlite3.Error as e:
-            await message.reply(f"⚠ Ошибка базы данных: {str(e)}")
-
-        await state.finish()
-    except ValueError:
-        await message.reply("⚠ Ошибка! Введите дату в формате YYYY-MM-DD.")
-      
-# Команда "Изменить статус"
-@dp.message_handler(lambda message: message.text == "🔄 Изменить статус")
-async def status_select_task(message: types.Message):
-    cursor.execute("SELECT id, task_text FROM tasks WHERE chat_id=?", (message.chat.id,))
-    tasks = cursor.fetchall()
-
-    if not tasks:
-        await message.reply("📭 У вас нет активных задач.")
-        return
-
-    keyboard = InlineKeyboardMarkup()
-    for task in tasks:
-        keyboard.add(InlineKeyboardButton(f"📌 {task[1]} (ID: {task[0]})", callback_data=f"change_status_{task[0]}"))
-
-    await message.reply("Выберите задачу для изменения статуса:", reply_markup=keyboard)
-
-# Выбор нового статуса
-@dp.callback_query_handler(lambda c: c.data.startswith("change_status_"))
-async def select_new_status(callback_query: types.CallbackQuery):
-    task_id = callback_query.data.split("_")[2]  # Исправлено на правильное извлечение ID задачи
-
-    # Клавиатура для выбора статуса
+# Клавиатура выбора статуса
+def get_status_keyboard(task_id):
     keyboard = InlineKeyboardMarkup(row_width=2)
     statuses = ["новая", "в работе", "исполнено"]
-    
-    # Разбиваем кнопки по рядам
     buttons = [InlineKeyboardButton(status, callback_data=f"set_status_{task_id}_{status}") for status in statuses]
     keyboard.add(*buttons)
+    return keyboard
 
-    await bot.send_message(callback_query.from_user.id, "🔄 Выберите новый статус:", reply_markup=keyboard)
+# ======================
+# СОСТОЯНИЯ БОТА
+# ======================
 
-# Установка нового статуса
-@dp.callback_query_handler(lambda c: c.data.startswith("set_status_"))
-async def set_status(callback_query: types.CallbackQuery):
-    _, task_id, new_status = callback_query.data.split("_")
+class TaskCreation(StatesGroup):
+    waiting_for_title = State()
+    waiting_for_executor = State()
+    waiting_for_deadline = State()
 
-    cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status, task_id))
-    conn.commit()
-
-    await callback_query.message.reply(f"✅ Статус задачи {task_id} обновлён на: {new_status}")
+# ======================
+# ОБРАБОТЧИКИ КОМАНД
+# ======================
 
 @dp.message_handler(commands=["start"])
 async def start_command(message: types.Message):
-    await message.reply("👋 Привет! Я бот для управления задачами. Выберите команду:", reply_markup=menu_keyboard)
+    """Обработка команды /start - приветствие и главное меню"""
+    await message.reply(
+        "👋 Привет! Я бот для управления задачами. Выберите команду:",
+        reply_markup=menu_keyboard
+    )
 
-@dp.message_handler(commands=["n"])
-async def new_task(message: types.Message):
+@dp.message_handler(commands=["help"])
+async def help_command(message: types.Message):
+    """Обработка команды /help - справка по командам"""
+    help_text = (
+        "📌 Список доступных команд:\n"
+        "/n -описание @исполнитель -дедлайн - Добавить новую задачу\n"
+        "/s ID -статус - Изменить статус задачи\n"
+        "/t - Просмотреть список задач\n"
+        "/help - Показать список команд\n\n"
+        "Или используйте кнопки меню:"
+    )
+    await message.reply(help_text, reply_markup=menu_keyboard)
+
+# ======================
+# СОЗДАНИЕ ЗАДАЧ
+# ======================
+
+@dp.message_handler(lambda message: message.text == "➕ Новая задача")
+async def new_task_start(message: types.Message):
+    """Начало создания задачи через кнопку меню"""
+    await message.reply("📌 Введите название задачи:")
+    await TaskCreation.waiting_for_title.set()
+
+@dp.message_handler(state=TaskCreation.waiting_for_title)
+async def process_title(message: types.Message, state: FSMContext):
+    """Обработка названия задачи"""
+    await state.update_data(title=message.text)
+    await message.reply("👤 Исполнитель (@username):")
+    await TaskCreation.waiting_for_executor.set()
+
+@dp.message_handler(state=TaskCreation.waiting_for_executor)
+async def process_executor(message: types.Message, state: FSMContext):
+    """Обработка исполнителя задачи"""
+    executor = message.text.strip()
+
+    if not re.match(r"^@\w+$", executor):
+        await message.reply("⚠ Ошибка! Введите исполнителя в формате @username\nПример: @example_user")
+        return
+
+    await state.update_data(executor=executor)
+    await message.reply(
+        "⏳ Выберите срок или введите свой:",
+        reply_markup=get_deadline_keyboard()
+    )
+    await TaskCreation.waiting_for_deadline.set()
+
+@dp.callback_query_handler(lambda c: c.data.startswith("set_deadline_"), state=TaskCreation.waiting_for_deadline)
+async def process_deadline(callback_query: types.CallbackQuery, state: FSMContext):
+    """Обработка выбора дедлайна (предустановленные даты)"""
+    if callback_query.data == "set_deadline_custom":
+        await callback_query.message.reply("⏳ Введите срок в формате YYYY-MM-DD:")
+        return
+
+    deadline = callback_query.data.split("_")[2]
+    await save_task(callback_query, state, deadline)
+
+async def save_task(message_obj, state: FSMContext, deadline: str):
+    """Сохранение задачи в БД"""
+    user_data = await state.get_data()
+    task_text = user_data['title']
+    executor = user_data['executor']
+
     try:
-        # Используем регулярное выражение для разбора команды
-        match = re.match(r"^/n -([\w\s\d.,!?]+) @([\w\d_]+) -([\d-]+)$", message.text)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO tasks (user_id, chat_id, task_text, deadline) VALUES (?, ?, ?, ?)",
+            (executor, message_obj.message.chat.id, task_text, deadline)
+        )
+        conn.commit()
+
+        response = (
+            f"✅ Задача создана!\n\n"
+            f"📌 <b>{task_text}</b>\n"
+            f"👤 {executor}\n"
+            f"⏳ {deadline}"
+        )
+        await message_obj.message.reply(response, parse_mode=ParseMode.HTML)
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка БД при сохранении задачи: {e}")
+        await message_obj.message.reply(f"⚠ Ошибка при сохранении задачи: {str(e)}")
+    finally:
+        await state.finish()
+
+@dp.message_handler(state=TaskCreation.waiting_for_deadline)
+async def process_custom_deadline(message: types.Message, state: FSMContext):
+    """Обработка ввода собственного срока"""
+    try:
+        datetime.strptime(message.text, "%Y-%m-%d")  # Проверка формата
+        await save_task(message, state, message.text.strip())
+    except ValueError:
+        await message.reply("⚠ Ошибка! Введите дату в формате YYYY-MM-DD.")
+
+# ======================
+# ИЗМЕНЕНИЕ СТАТУСА
+# ======================
+
+@dp.message_handler(lambda message: message.text == "🔄 Изменить статус")
+async def status_select_task(message: types.Message):
+    """Выбор задачи для изменения статуса"""
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, task_text FROM tasks")
+        tasks = cursor.fetchall()
+
+        if not tasks:
+            await message.reply("📭 У вас нет активных задач.")
+            return
+
+        keyboard = InlineKeyboardMarkup()
+        for task_id, task_text in tasks:
+            keyboard.add(InlineKeyboardButton(
+                f"📌 {task_text} (ID: {task_id})", 
+                callback_data=f"change_status_{task_id}"
+            ))
+
+        await message.reply("Выберите задачу для изменения статуса:", reply_markup=keyboard)
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка БД при получении задач: {e}")
+        await message.reply("⚠ Ошибка при получении списка задач.")
+
+@dp.callback_query_handler(lambda c: c.data.startswith("change_status_"))
+async def select_new_status(callback_query: types.CallbackQuery):
+    """Выбор нового статуса для задачи"""
+    task_id = callback_query.data.split("_")[2]
+    await callback_query.message.reply(
+        "🔄 Выберите новый статус:",
+        reply_markup=get_status_keyboard(task_id)
+    )
+
+@dp.callback_query_handler(lambda c: c.data.startswith("set_status_"))
+async def set_status(callback_query: types.CallbackQuery):
+    """Установка нового статуса задачи"""
+    _, task_id, new_status = callback_query.data.split("_")
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status, task_id))
+        conn.commit()
+        await callback_query.message.reply(f"✅ Статус задачи {task_id} обновлён на: {new_status}")
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка БД при обновлении статуса: {e}")
+        await callback_query.message.reply("⚠ Ошибка при обновлении статуса.")
+
+# ======================
+# РАБОТА С ЗАДАЧАМИ
+# ======================
+
+@dp.message_handler(commands=["newtask"])
+async def new_task_command(message: types.Message):
+    """Создание задачи через команду /newtask"""
+    try:
+        match = re.match(r"^/newtask -([\w\s\d.,!?]+) @([\w\d_]+) -([\d-]+)$", message.text)
 
         if not match:
             await message.reply("⚠️ Неверный формат! Используйте: -описание @исполнитель -срок")
@@ -226,80 +265,129 @@ async def new_task(message: types.Message):
 
         task_text, user_id, deadline = match.groups()
 
-        cursor.execute("INSERT INTO tasks (chat_id, user_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-                       (message.chat.id, user_id, task_text.strip(), deadline.strip()))
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO tasks (user_id, chat_id, task_text, deadline) VALUES (?, ?, ?, ?)",
+            (f"@{user_id}", message.chat.id, task_text.strip(), deadline.strip())
+        )
         conn.commit()
-
+        await message.reply(f"✅ Задача создана: {task_text.strip()} для @{user_id} до {deadline.strip()}")
     except Exception as e:
-        await message.reply(f"Ошибка при добавлении задачи: {str(e)}")
+        logger.error(f"Ошибка при создании задачи: {e}")
+        await message.reply(f"⚠ Ошибка при добавлении задачи: {str(e)}")
 
-@dp.message_handler(commands=["s"])
-async def change_status(message: types.Message):
-    match = re.match(r"^/s (\d+) -([\w\s]+)$", message.text.strip())
+@dp.message_handler(commands=["status"])
+async def change_status_command(message: types.Message):
+    """Изменение статуса через команду /status"""
+    try:
+        match = re.match(r"^/status (\d+) -([\w\s]+)$", message.text.strip())
 
-    if not match:
-        await message.reply("⚠ Используйте формат: /status ID -новый_статус\nНапример: /status 123 -в работе")
-        return
+        if not match:
+            await message.reply("⚠ Используйте формат: /s ID -новый_статус\nНапример: /s 123 -в работе")
+            return
 
-    task_id, new_status = match.groups()
+        task_id, new_status = match.groups()
 
-    cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status.strip(), task_id))
-    conn.commit()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status.strip(), task_id))
+        conn.commit()
+        await message.reply(f"✅ Статус задачи {task_id} обновлён до '{new_status.strip()}'")
+    except Exception as e:
+        logger.error(f"Ошибка при изменении статуса: {e}")
+        await message.reply(f"⚠ Ошибка при изменении статуса: {str(e)}")
 
-    await message.reply(f"✅ Статус задачи {task_id} обновлён до '{new_status.strip()}'")
-
-# Команда для просмотра задач
-@dp.message_handler(commands=["t"])
+@dp.message_handler(lambda message: message.text == "📋 Список задач")
 async def list_tasks(message: types.Message):
-    cursor.execute("SELECT id, user_id, task_text, status, deadline FROM tasks")
-    tasks = cursor.fetchall()
-    if not tasks:
-        await message.reply("Задач нет")
-        return
-    result = "\n".join([f"[{t[0]}] @{t[1]}: {t[2]} (Статус: {t[3]}, Дедлайн: {t[4]})" for t in tasks])
-    await message.reply(result)
-
-# Команда помощи
-@dp.message_handler(commands=["help"])
-async def help_command(message: types.Message):
-    help_text = (
-        "📌 Список доступных команд:\n"
-        "/n -описание @исполнитель -дедлайн - Добавить новую задачу\n"
-        "/s ID -статус - Изменить статус задачи\n"
-        "/t - Просмотреть список задач\n"
-        "/help - Показать список команд"
-    )
-    await message.reply(help_text)
-  
-# Функция напоминаний о задачах
-async def check_deadlines():
-    while True:
-        now = datetime.now().strftime("%Y-%m-%d")
-        cursor.execute("SELECT id, chat_id, task_text FROM tasks WHERE deadline=? AND status != 'исполнено'", (now,))
+    """Просмотр списка задач"""
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, user_id, task_text, status, deadline FROM tasks")
         tasks = cursor.fetchall()
-        for task in tasks:
-            await bot.send_message(task[1], f"⏳ Напоминание о задаче {task[0]}: {task[2]}")
-        await asyncio.sleep(3600)  # Проверка раз в час
 
-# Health check для Koyeb
+        if not tasks:
+            await message.reply("📭 У вас нет активных задач.")
+            return
+
+        result = []
+        for task in tasks:
+            task_id, user_id, task_text, status, deadline = task
+            result.append(
+                f"🔹 ID: {task_id}\n"
+                f"👤 Исполнитель: {user_id}\n"
+                f"📝 Описание: {task_text}\n"
+                f"🔄 Статус: {status}\n"
+                f"⏳ Срок: {deadline}\n"
+                f"──────────────────"
+            )
+
+        await message.reply("\n".join(result))
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка БД при получении задач: {e}")
+        await message.reply("⚠ Ошибка при получении списка задач.")
+
+# ======================
+# ФОНОВЫЕ ЗАДАЧИ
+# ======================
+
+async def check_deadlines():
+    """Проверка дедлайнов и отправка напоминаний"""
+    while True:
+        try:
+            now = datetime.now().strftime("%Y-%m-%d")
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, chat_id, task_text FROM tasks WHERE deadline=? AND status != 'исполнено'", 
+                (now,)
+            )
+            tasks = cursor.fetchall()
+
+            for task_id, chat_id, task_text in tasks:
+                try:
+                    await bot.send_message(
+                        chat_id,
+                        f"⏳ Напоминание о задаче {task_id}:\n{task_text}"
+                    )
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке напоминания: {e}")
+
+            await asyncio.sleep(3600)  # Проверка раз в час
+        except Exception as e:
+            logger.error(f"Ошибка в фоновой задаче проверки дедлайнов: {e}")
+            await asyncio.sleep(60)
+
+# ======================
+# HEALTH CHECK
+# ======================
+
 async def health_check(request):
+    """Endpoint для health check"""
     return web.Response(text="OK")
 
 async def start_web_server():
+    """Запуск HTTP сервера для health check"""
     app = web.Application()
     app.router.add_get('/health', health_check)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8000)  # Запускаем сервер на порту 8000
+    site = web.TCPSite(runner, '0.0.0.0', 8000)
     await site.start()
 
-# Основная функция, запускающая и бота, и сервер
+# ======================
+# ЗАПУСК БОТА
+# ======================
+
 async def main():
-    asyncio.create_task(check_deadlines())  # Фоновая задача для напоминаний
+    """Основная функция запуска"""
+    asyncio.create_task(check_deadlines())
     await asyncio.gather(
-        start_web_server(),  # HTTP-сервер для health check
-        dp.start_polling()   # Запуск бота
+        start_web_server(),
+        dp.start_polling()
     )
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logger.error(f"Ошибка при запуске бота: {e}")
+    finally:
+        conn.close()
