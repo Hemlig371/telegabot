@@ -9,6 +9,7 @@ import os
 from aiohttp import web
 import re
 from aiogram.types import BotCommand
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 # Укажите токен бота
 API_TOKEN = os.getenv('apibotkey')
@@ -41,6 +42,15 @@ async def set_bot_commands():
         BotCommand(command="help", description="❓ Помощь"),
     ]
     await bot.set_my_commands(commands)
+
+menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+menu_keyboard.add(KeyboardButton("/n"))
+menu_keyboard.add(KeyboardButton("/s"), KeyboardButton("/t"))
+menu_keyboard.add(KeyboardButton("/help"))
+
+@dp.message_handler(commands=["start"])
+async def start_command(message: types.Message):
+    await message.reply("👋 Привет! Я бот для управления задачами. Выберите команду:", reply_markup=menu_keyboard)
 
 @dp.message_handler(commands=["n"])
 async def new_task(message: types.Message):
