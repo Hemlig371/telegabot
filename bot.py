@@ -32,11 +32,11 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS tasks (
                     deadline TEXT)''')
 conn.commit()
 
-@dp.message_handler(commands=["newtask"])
+@dp.message_handler(commands=["n"])
 async def new_task(message: types.Message):
     try:
         # Используем регулярное выражение для разбора команды
-        match = re.match(r"^/newtask -([\w\s\d.,!?]+) @([\w\d_]+) -([\d-]+)$", message.text)
+        match = re.match(r"^/n -([\w\s\d.,!?]+) @([\w\d_]+) -([\d-]+)$", message.text)
 
         if not match:
             await message.reply("⚠️ Неверный формат! Используйте: -описание @исполнитель -срок")
@@ -51,20 +51,23 @@ async def new_task(message: types.Message):
     except Exception as e:
         await message.reply(f"Ошибка при добавлении задачи: {str(e)}")
 
-# Команда для изменения статуса
-@dp.message_handler(commands=["status"])
+@dp.message_handler(commands=["s"])
 async def change_status(message: types.Message):
-    args = re.match(r"^/status -([\w\s\d.,!?]+)", message.text)
-    if len(args) < 3:
-        await message.reply("Используйте: /status ID (новая/в работе/исполнено)")
+    match = re.match(r"^/s (\d+) -([\w\s]+)$", message.text.strip())
+
+    if not match:
+        await message.reply("⚠ Используйте формат: /status ID -новый_статус\nНапример: /status 123 -в работе")
         return
-    task_id, new_status = args[1], args[2]
-    cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status, task_id))
+
+    task_id, new_status = match.groups()
+
+    cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status.strip(), task_id))
     conn.commit()
-    await message.reply(f"Статус задачи {task_id} обновлен до {new_status}")
+
+    await message.reply(f"✅ Статус задачи {task_id} обновлён до '{new_status.strip()}'")
 
 # Команда для просмотра задач
-@dp.message_handler(commands=["tasks"])
+@dp.message_handler(commands=["t"])
 async def list_tasks(message: types.Message):
     cursor.execute("SELECT id, user_id, task_text, status, deadline FROM tasks")
     tasks = cursor.fetchall()
@@ -79,9 +82,9 @@ async def list_tasks(message: types.Message):
 async def help_command(message: types.Message):
     help_text = (
         "📌 Список доступных команд:\n"
-        "/newtask -описание @исполнитель -дедлайн - Добавить новую задачу\n"
-        "/status ID статус - Изменить статус задачи\n"
-        "/tasks - Просмотреть список задач\n"
+        "/n -описание @исполнитель -дедлайн - Добавить новую задачу\n"
+        "/s ID -статус - Изменить статус задачи\n"
+        "/t - Просмотреть список задач\n"
         "/help - Показать список команд"
     )
     await message.reply(help_text)
