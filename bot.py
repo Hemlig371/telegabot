@@ -14,6 +14,15 @@ from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.dispatcher import FSMContext
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from datetime import datetime, timedelta
+from aiogram import types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.dispatcher import Dispatcher
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.dispatcher.filters import Text
+import sqlite3
+import re
 
 # Укажите токен бота
 API_TOKEN = os.getenv('apibotkey')
@@ -85,21 +94,18 @@ async def process_executor(message: types.Message, state: FSMContext):
 
     await state.update_data(executor=executor)
 
-# Формируем inline-клавиатуру с датами и кнопкой для ввода своего срока
-@dp.message_handler(state=TaskCreation.waiting_for_deadline)
-async def deadline_select(message: types.Message, state: FSMContext):
+    # Формируем inline-клавиатуру с датами и кнопкой для ввода своего срока
     today = datetime.today()
     dates = {
         "Сегодня": today.strftime("%Y-%m-%d"),
         "Завтра": (today + timedelta(days=1)).strftime("%Y-%m-%d"),
         "Послезавтра": (today + timedelta(days=2)).strftime("%Y-%m-%d"),
     }
-    
-    # Клавиатура для выбора даты
+
     keyboard = InlineKeyboardMarkup(row_width=1)
     for label, date in dates.items():
         keyboard.add(InlineKeyboardButton(label, callback_data=f"set_deadline_{date}"))
-    
+
     # Добавляем кнопку для ввода своего срока
     keyboard.add(InlineKeyboardButton("Свой срок", callback_data="set_deadline_custom"))
 
