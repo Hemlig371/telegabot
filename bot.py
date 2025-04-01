@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import os
 from aiohttp import web
 import re
+from aiogram.types import BotCommand
 
 # Укажите токен бота
 API_TOKEN = os.getenv('apibotkey')
@@ -31,6 +32,15 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS tasks (
                     status TEXT DEFAULT 'новая',
                     deadline TEXT)''')
 conn.commit()
+
+async def set_bot_commands():
+    commands = [
+        BotCommand(command="newtask", description="➕ Добавить задачу"),
+        BotCommand(command="status", description="🔄 Изменить статус"),
+        BotCommand(command="tasks", description="📋 Посмотреть задачи"),
+        BotCommand(command="help", description="❓ Помощь"),
+    ]
+    await bot.set_my_commands(commands)
 
 @dp.message_handler(commands=["n"])
 async def new_task(message: types.Message):
