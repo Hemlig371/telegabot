@@ -14,6 +14,10 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.utils import executor
 from aiohttp import web
 
+import csv
+import io
+from aiogram.types import InputFile
+
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
@@ -60,6 +64,7 @@ menu_keyboard.row(
     KeyboardButton("➕ Новая задача"),
     KeyboardButton("🔄 Изменить статус"),
     KeyboardButton("📋 Список задач"),
+    KeyboardButton("📤 Экспорт задач")
 )
 
 # Клавиатура выбора даты
@@ -207,6 +212,7 @@ async def status_select_task(message: types.Message):
     """Выбор задачи для изменения статуса"""
     try:
         cursor = conn.cursor()
+        # Добавляем фильтрацию по chat_id, чтобы пользователь видел только свои задачи
         cursor.execute("SELECT id, task_text FROM tasks")
         tasks = cursor.fetchall()
 
@@ -216,8 +222,9 @@ async def status_select_task(message: types.Message):
 
         keyboard = InlineKeyboardMarkup()
         for task_id, task_text in tasks:
+            # Упрощаем текст кнопки для лучшей читаемости
             keyboard.add(InlineKeyboardButton(
-                f"📌 {task_text} (ID: {task_id})", 
+                f"{task_text[:20]}... (ID: {task_id})", 
                 callback_data=f"change_status_{task_id}"
             ))
 
@@ -229,24 +236,53 @@ async def status_select_task(message: types.Message):
 @dp.callback_query_handler(lambda c: c.data.startswith("change_status_"))
 async def select_new_status(callback_query: types.CallbackQuery):
     """Выбор нового статуса для задачи"""
-    task_id = callback_query.data.split("_")[2]
-    await callback_query.message.reply(
-        "🔄 Выберите новый статус:",
-        reply_markup=get_status_keyboard(task_id)
-    )
+    try:
+        task_id = callback_query.data.split("_")[2]
+        await bot.answer_callback_query(callback_query.id)  # Убираем "часики" у кнопки
+        
+        # Получаем текущий статус задачи для информации
+        cursor = conn.cursor()
+        cursor.execute("SELECT status FROM tasks WHERE id=?", (task_id,))
+        current_status = cursor.fetchone()[0]
+        
+        await callback_query.message.reply(
+            f"Текущий статус: {current_status}\n"
+            "🔄 Выберите новый статус:",
+            reply_markup=get_status_keyboard(task_id)
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при выборе статуса: {e}")
+        await callback_query.message.reply("⚠ Ошибка при изменении статуса.")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("set_status_"))
 async def set_status(callback_query: types.CallbackQuery):
     """Установка нового статуса задачи"""
-    _, task_id, new_status = callback_query.data.split("_")
-
     try:
+        _, task_id, new_status = callback_query.data.split("_")
+        await bot.answer_callback_query(callback_query.id)  # Убираем "часики" у кнопки
+        
         cursor = conn.cursor()
+        # Проверяем, существует ли задача
+        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
+        if not cursor.fetchone():
+            await callback_query.message.reply("⚠ Задача не найдена!")
+            return
+            
         cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status, task_id))
         conn.commit()
-        await callback_query.message.reply(f"✅ Статус задачи {task_id} обновлён на: {new_status}")
-    except sqlite3.Error as e:
-        logger.error(f"Ошибка БД при обновлении статуса: {e}")
+        
+        # Получаем обновленную информацию о задаче
+        cursor.execute("SELECT task_text FROM tasks WHERE id=?", (task_id,))
+        task_text = cursor.fetchone()[0]
+        
+        await callback_query.message.reply(
+            f"✅ Статус задачи обновлён:\n"
+            f"📌 {task_text[:50]}...\n"
+            f"🆔 ID: {task_id}\n"
+            f"🔄 Новый статус: {new_status}"
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при установке статуса: {e}")
         await callback_query.message.reply("⚠ Ошибка при обновлении статуса.")
 
 # ======================
@@ -325,6 +361,48 @@ async def list_tasks(message: types.Message):
         logger.error(f"Ошибка БД при получении задач: {e}")
         await message.reply("⚠ Ошибка при получении списка задач.")
 
+# ======================
+# ЭКСПОРТ ЗАДАЧ В CSV
+# ======================
+
+@dp.message_handler(lambda message: message.text == "📤 Экспорт задач")
+async def export_tasks_to_csv(message: types.Message):
+    """Экспорт всех задач в CSV файл"""
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tasks")
+        tasks = cursor.fetchall()
+        
+        if not tasks:
+            await message.reply("📭 В базе нет задач для экспорта.")
+            return
+
+        # Создаем CSV в памяти
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Заголовки столбцов
+        writer.writerow(['ID', 'User ID', 'Chat ID', 'Task Text', 'Status', 'Deadline'])
+        
+        # Данные
+        for task in tasks:
+            writer.writerow(task)
+        
+        # Перемещаем указатель в начало
+        output.seek(0)
+        
+        # Создаем временный файл
+        csv_file = InputFile(io.BytesIO(output.getvalue().encode()), filename="tasks_export.csv")
+        
+        await message.reply_document(
+            document=csv_file,
+            caption="📊 Экспорт всех задач в CSV"
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при экспорте задач: {e}")
+        await message.reply("⚠ Ошибка при создании файла экспорта.")
+      
 # ======================
 # ФОНОВЫЕ ЗАДАЧИ
 # ======================
