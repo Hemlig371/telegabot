@@ -247,6 +247,7 @@ async def status_select_task(message: types.Message):
         cursor.execute("""
             SELECT id, task_text, status 
             FROM tasks 
+            WHERE chat_id=?
             ORDER BY id DESC 
             LIMIT 5
         """, (message.chat.id,))
@@ -346,6 +347,7 @@ async def deadline_select_task(message: types.Message):
         cursor.execute("""
             SELECT id, task_text, deadline 
             FROM tasks
+            WHERE chat_id=?
             ORDER BY id DESC 
             LIMIT 5
         """, (message.chat.id,))
