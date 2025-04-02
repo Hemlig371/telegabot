@@ -274,10 +274,10 @@ async def status_select_task(message: types.Message):
 @dp.callback_query_handler(lambda c: c.data.startswith("status_task_"), state=StatusUpdate.waiting_for_task_selection)
 async def process_selected_task_status(callback_query: types.CallbackQuery, state: FSMContext):
     """Обработка выбранной задачи для изменения статуса"""
-    task_id = callback_query.data.split("_")[-1]
+    task_id = callback_query.data.split("_")[2]
     await state.update_data(task_id=task_id)
     await show_status_options(callback_query.message)
-    await StatusUpdate.waiting_for_status_choice.set()
+    await show_status_options(callback_query.message, task_id)
 
 @dp.callback_query_handler(lambda c: c.data == "status_manual_id", state=StatusUpdate.waiting_for_task_selection)
 async def ask_for_manual_id_status(callback_query: types.CallbackQuery):
