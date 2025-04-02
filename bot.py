@@ -63,6 +63,7 @@ menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True
 menu_keyboard.add(
     KeyboardButton("➕ Новая задача"),
     KeyboardButton("🔄 Изменить статус"),
+    KeyboardButton("⏳ Изменить срок"),
     KeyboardButton("📋 Список задач"),
     KeyboardButton("📤 Экспорт задач"),
     KeyboardButton("🗑 Удалить задачу")
@@ -93,15 +94,6 @@ def get_status_keyboard(task_id):
     statuses = ["новая", "в работе", "ожидает доклада", "исполнено"]
     buttons = [InlineKeyboardButton(status, callback_data=f"set_status_{task_id}_{status}") for status in statuses]
     keyboard.add(*buttons)
-    return keyboard
-
-# Клавиатура действий для задачи
-def get_task_actions_keyboard(task_id):
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton("🔄 Изменить статус", callback_data=f"change_status_{task_id}"),
-        InlineKeyboardButton("📅 Изменить срок", callback_data=f"change_date_{task_id}")
-    )
     return keyboard
 
 # ======================
@@ -322,18 +314,17 @@ async def set_status(callback_query: types.CallbackQuery):
 # ИЗМЕНЕНИЕ СРОКА
 # ======================
 
-@dp.message_handler(lambda message: message.text == "📅 Изменить срок")
+@dp.message_handler(lambda message: message.text == "⏳ Изменить срок")
 async def deadline_select_task(message: types.Message):
     """Выбор задачи для изменения срока"""
     try:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT id, task_text, deadline 
-            FROM tasks 
-            WHERE chat_id=?
+            FROM tasks
             ORDER BY id DESC 
             LIMIT 5
-        """, (message.chat.id,))
+        """)
         tasks = cursor.fetchall()
 
         if not tasks:
@@ -489,10 +480,9 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
         cursor.execute("""
             SELECT id, user_id, task_text, status, deadline 
             FROM tasks 
-            WHERE chat_id=?
             ORDER BY id DESC 
             LIMIT 10 OFFSET ?
-        """, (message.chat.id, page * 10))
+        """, (page * 10))
         tasks = cursor.fetchall()
 
         # Формируем сообщение
