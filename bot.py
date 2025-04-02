@@ -339,9 +339,14 @@ async def set_status(callback_query: types.CallbackQuery):
 # ИЗМЕНЕНИЕ СРОКА
 # ======================
 
+class TaskUpdate(StatesGroup):
+    waiting_for_task_selection = State()  # Для выбора задачи
+    waiting_for_deadline_choice = State()  # Для выбора типа срока
+    waiting_for_custom_deadline = State()  # Для ввода даты вручную
+
 @dp.message_handler(lambda message: message.text == "⏳ Изменить срок")
 async def deadline_select_task(message: types.Message):
-    """Выбор задачи для изменения срока"""
+    """Показ списка задач для изменения срока"""
     try:
         cursor = conn.cursor()
         cursor.execute("""
@@ -360,117 +365,97 @@ async def deadline_select_task(message: types.Message):
         keyboard = InlineKeyboardMarkup(row_width=1)
         for task_id, task_text, deadline in tasks:
             keyboard.add(InlineKeyboardButton(
-                f"{task_text[:30]}... (ID: {task_id}, срок: {deadline if deadline else 'нет'})", 
-                callback_data=f"select_task_for_deadline_{task_id}"
+                f"{task_text[:30]}... (ID: {task_id})", 
+                callback_data=f"deadline_task_{task_id}"
             ))
         
-        keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="enter_task_id_manually_deadline"))
+        keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="deadline_manual_id"))
 
         await message.reply("Выберите задачу для изменения срока:", reply_markup=keyboard)
+        await TaskUpdate.waiting_for_task_selection.set()
     except Exception as e:
-        logger.error(f"Ошибка при получении списка задач: {str(e)}")
-        await message.reply("⚠ Ошибка при получении списка задач. Попробуйте позже.")
+        logger.error(f"Ошибка при получении списка задач: {e}")
+        await message.reply("⚠ Ошибка при получении списка задач")
 
-@dp.callback_query_handler(lambda c: c.data == "enter_task_id_manually_deadline")
-async def ask_for_task_id_deadline(callback_query: types.CallbackQuery):
-    """Запрос ID задачи для ручного ввода при изменении срока"""
-    await bot.answer_callback_query(callback_query.id)
-    await callback_query.message.reply("✏️ Введите ID задачи для изменения срока:")
-    await TaskUpdate.waiting_for_deadline_task_id.set()
+@dp.callback_query_handler(lambda c: c.data.startswith("deadline_task_"), state=TaskUpdate.waiting_for_task_selection)
+async def process_selected_task(callback_query: types.CallbackQuery, state: FSMContext):
+    """Обработка выбранной задачи"""
+    task_id = callback_query.data.split("_")[-1]
+    await state.update_data(task_id=task_id)
+    await show_deadline_options(callback_query.message)
+    await TaskUpdate.waiting_for_deadline_choice.set()
 
-@dp.message_handler(state=TaskUpdate.waiting_for_deadline_task_id)
-async def process_manual_task_id_deadline(message: types.Message, state: FSMContext):
-    """Обработка введенного вручную ID задачи для изменения срока"""
+@dp.callback_query_handler(lambda c: c.data == "deadline_manual_id", state=TaskUpdate.waiting_for_task_selection)
+async def ask_for_manual_id(callback_query: types.CallbackQuery):
+    """Запрос ручного ввода ID"""
+    await callback_query.message.reply("✏️ Введите ID задачи:")
+    await TaskUpdate.waiting_for_task_selection.set()
+
+@dp.message_handler(state=TaskUpdate.waiting_for_task_selection)
+async def process_manual_task_id(message: types.Message, state: FSMContext):
+    """Обработка ручного ввода ID задачи"""
     try:
         task_id = int(message.text)
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM tasks WHERE id=? AND chat_id=?", (task_id, message.chat.id))
         if not cursor.fetchone():
-            await message.reply("⚠ Задача с таким ID не найдена или не принадлежит вам!")
-            await state.finish()
+            await message.reply("⚠ Задача не найдена!")
             return
         
         await state.update_data(task_id=task_id)
-        await show_deadline_selection(message, task_id)
+        await show_deadline_options(message)
+        await TaskUpdate.waiting_for_deadline_choice.set()
     except ValueError:
-        await message.reply("⚠ Пожалуйста, введите числовой ID задачи!")
-    except Exception as e:
-        logger.error(f"Ошибка при обработке ID задачи: {e}")
-        await message.reply("⚠ Произошла ошибка. Попробуйте снова.")
-        await state.finish()
+        await message.reply("⚠ Введите числовой ID задачи!")
 
-@dp.callback_query_handler(lambda c: c.data.startswith("select_task_for_deadline_"))
-async def select_task_for_deadline_update(callback_query: types.CallbackQuery, state: FSMContext):
-    """Обработка выбора задачи для изменения срока"""
-    task_id = callback_query.data.split("_")[-1]
-    await bot.answer_callback_query(callback_query.id)
-    await state.update_data(task_id=task_id)
-    await show_deadline_selection(callback_query.message, task_id)
+async def show_deadline_options(message_obj):
+    """Показать варианты выбора срока"""
+    keyboard = get_deadline_keyboard(with_none_option=True)
+    await message_obj.reply("⏳ Выберите новый срок:", reply_markup=keyboard)
 
-async def show_deadline_selection(message_obj, task_id):
-    """Показать клавиатуру выбора срока (общая функция)"""
-    await message_obj.reply(
-        "⏳ Выберите новый срок для задачи:",
-        reply_markup=get_deadline_keyboard(with_none_option=True)
-    )
-    await TaskUpdate.waiting_for_deadline.set()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("set_deadline_"), state=TaskUpdate.waiting_for_deadline)
-async def process_new_deadline(callback_query: types.CallbackQuery, state: FSMContext):
-    """Обработка нового срока выполнения"""
-    try:
+@dp.callback_query_handler(lambda c: c.data.startswith("set_deadline_"), state=TaskUpdate.waiting_for_deadline_choice)
+async def process_deadline_choice(callback_query: types.CallbackQuery, state: FSMContext):
+    """Обработка выбора типа срока"""
+    if callback_query.data == "set_deadline_custom":
+        await callback_query.message.reply("📅 Введите дату в формате ГГГГ-ММ-ДД:")
+        await TaskUpdate.waiting_for_custom_deadline.set()
+    else:
         user_data = await state.get_data()
         task_id = user_data['task_id']
         
-        if callback_query.data == "set_deadline_custom":
-            await callback_query.message.reply("⏳ Введите новую дату в формате YYYY-MM-DD:")
-            return
-        elif callback_query.data == "set_deadline_none":
+        if callback_query.data == "set_deadline_none":
             new_deadline = None
-            response_text = "✅ Срок выполнения удален"
+            response = "✅ Срок выполнения удален"
         else:
             new_deadline = callback_query.data.split("_")[2]
-            response_text = f"✅ Новый срок выполнения: {new_deadline}"
+            response = f"✅ Новый срок: {new_deadline}"
         
         cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE tasks SET deadline=? WHERE id=?",
-            (new_deadline, task_id)
-        )
+        cursor.execute("UPDATE tasks SET deadline=? WHERE id=?", (new_deadline, task_id))
         conn.commit()
         
-        await callback_query.message.reply(response_text)
-    except Exception as e:
-        logger.error(f"Ошибка при изменении срока: {e}")
-        await callback_query.message.reply("⚠ Ошибка при изменении срока")
-    finally:
+        await callback_query.message.reply(response)
         await state.finish()
 
-@dp.message_handler(state=TaskUpdate.waiting_for_deadline)
-async def process_custom_new_deadline(message: types.Message, state: FSMContext):
-    """Обработка ввода собственного срока"""
+@dp.message_handler(state=TaskUpdate.waiting_for_custom_deadline)
+async def process_custom_deadline(message: types.Message, state: FSMContext):
+    """Обработка ввода даты вручную"""
     try:
+        # Проверка формата даты
+        datetime.strptime(message.text, "%Y-%m-%d")
+        new_deadline = message.text
+        
         user_data = await state.get_data()
         task_id = user_data['task_id']
         
-        datetime.strptime(message.text, "%Y-%m-%d")  # Проверка формата
-        new_deadline = message.text.strip()
-        
         cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE tasks SET deadline=? WHERE id=?",
-            (new_deadline, task_id)
-        )
+        cursor.execute("UPDATE tasks SET deadline=? WHERE id=?", (new_deadline, task_id))
         conn.commit()
         
-        await message.reply(f"✅ Новый срок выполнения: {new_deadline}")
-    except ValueError:
-        await message.reply("⚠ Ошибка! Введите дату в формате YYYY-MM-DD.")
-    except Exception as e:
-        logger.error(f"Ошибка при изменении срока: {e}")
-        await message.reply("⚠ Ошибка при изменении срока")
-    finally:
+        await message.reply(f"✅ Новый срок установлен: {new_deadline}")
         await state.finish()
+    except ValueError:
+        await message.reply("⚠ Неверный формат даты! Используйте YYYY-MM-DD")
 
 # ======================
 # СПИСОК ЗАДАЧ
