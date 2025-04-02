@@ -97,6 +97,55 @@ def get_status_keyboard(task_id):
     return keyboard
 
 # ======================
+# ОБРАБОТЧИКИ КОМАНД
+# ======================
+
+# Установка команд с подсказками
+async def set_bot_commands(bot: Bot):
+    commands = [
+        BotCommand(command="/start", description="Старт"),
+        BotCommand(command="/newtask", description="Создать задачу"),
+        BotCommand(command="/setstatus", description="Изменить статус"),
+        BotCommand(command="/setdeadline", description="Изменить срок"),
+        BotCommand(command="/listtasks", description="Список задач"),
+        BotCommand(command="/export", description="Экспорт в CSV"),
+        BotCommand(command="/deletetask", description="Удалить задачу"),
+    ]
+    await bot.set_my_commands(commands)
+
+@dp.message_handler(commands=["start"])
+async def start_command(message: types.Message):
+    await message.reply(
+        "👋 Используйте команды или кнопки:",
+        reply_markup=menu_keyboard
+    )
+
+# Команды вызывают те же функции, что и кнопки
+@dp.message_handler(commands=["newtask"])
+async def cmd_new_task(message: types.Message):
+    await new_task_start(message)  # Тот же обработчик, что и для кнопки "➕ Новая задача"
+
+@dp.message_handler(commands=["setstatus"])
+async def cmd_set_status(message: types.Message):
+    await status_select_task(message)  # Аналогично кнопке "🔄 Изменить статус"
+
+@dp.message_handler(commands=["setdeadline"])
+async def cmd_set_deadline(message: types.Message):
+    await deadline_select_task(message)  # Аналогично кнопке "⏳ Изменить срок"
+
+@dp.message_handler(commands=["listtasks"])
+async def cmd_list_tasks(message: types.Message):
+    await list_tasks(message)  # Аналогично кнопке "📋 Список задач"
+
+@dp.message_handler(commands=["export"])
+async def cmd_export_tasks(message: types.Message):
+    await export_tasks_to_csv(message)  # Аналогично кнопке "📤 Экспорт задач"
+
+@dp.message_handler(commands=["deletetask"])
+async def cmd_delete_task(message: types.Message):
+    await delete_task_start(message)  # Аналогично кнопке "🗑 Удалить задачу"
+
+# ======================
 # СОСТОЯНИЯ БОТА
 # ======================
 
@@ -827,6 +876,7 @@ async def start_web_server():
 
 async def main():
     """Основная функция запуска"""
+    await set_bot_commands(bot)  # Регистрация команд в интерфейсе Telegram
     asyncio.create_task(check_deadlines())
     await asyncio.gather(
         start_web_server(),
