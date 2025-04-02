@@ -59,8 +59,8 @@ conn = init_db()
 # ======================
 
 # Главное меню
-menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-menu_keyboard.row(
+menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+menu_keyboard.add(
     KeyboardButton("➕ Новая задача"),
     KeyboardButton("🔄 Изменить статус"),
     KeyboardButton("📋 Список задач"),
@@ -69,7 +69,7 @@ menu_keyboard.row(
 )
 
 # Клавиатура выбора даты
-def get_deadline_keyboard():
+def get_deadline_keyboard(with_none_option=False):
     today = datetime.today()
     dates = {
         "Сегодня": today.strftime("%Y-%m-%d"),
@@ -80,15 +80,28 @@ def get_deadline_keyboard():
     keyboard = InlineKeyboardMarkup(row_width=1)
     for label, date in dates.items():
         keyboard.add(InlineKeyboardButton(label, callback_data=f"set_deadline_{date}"))
+    
+    if with_none_option:
+        keyboard.add(InlineKeyboardButton("❌ Без срока", callback_data="set_deadline_none"))
+    
     keyboard.add(InlineKeyboardButton("Свой срок", callback_data="set_deadline_custom"))
     return keyboard
 
 # Клавиатура выбора статуса
 def get_status_keyboard(task_id):
     keyboard = InlineKeyboardMarkup(row_width=2)
-    statuses = ["новая", "в работе", "исполнено"]
+    statuses = ["новая", "в работе", "ожидает доклада", "исполнено"]
     buttons = [InlineKeyboardButton(status, callback_data=f"set_status_{task_id}_{status}") for status in statuses]
     keyboard.add(*buttons)
+    return keyboard
+
+# Клавиатура действий для задачи
+def get_task_actions_keyboard(task_id):
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton("🔄 Изменить статус", callback_data=f"change_status_{task_id}"),
+        InlineKeyboardButton("📅 Изменить срок", callback_data=f"change_date_{task_id}")
+    )
     return keyboard
 
 # ======================
@@ -99,6 +112,7 @@ class TaskCreation(StatesGroup):
     waiting_for_title = State()
     waiting_for_executor = State()
     waiting_for_deadline = State()
+    waiting_for_new_date = State()
 
 # ======================
 # ОБРАБОТЧИКИ КОМАНД
@@ -111,19 +125,6 @@ async def start_command(message: types.Message):
         "👋 Привет! Я бот для управления задачами. Выберите команду:",
         reply_markup=menu_keyboard
     )
-
-@dp.message_handler(commands=["help"])
-async def help_command(message: types.Message):
-    """Обработка команды /help - справка по командам"""
-    help_text = (
-        "📌 Список доступных команд:\n"
-        "/n -описание @исполнитель -дедлайн - Добавить новую задачу\n"
-        "/s ID -статус - Изменить статус задачи\n"
-        "/t - Просмотреть список задач\n"
-        "/help - Показать список команд\n\n"
-        "Или используйте кнопки меню:"
-    )
-    await message.reply(help_text, reply_markup=menu_keyboard)
 
 # ======================
 # СОЗДАНИЕ ЗАДАЧ
@@ -153,20 +154,22 @@ async def process_executor(message: types.Message, state: FSMContext):
 
     await state.update_data(executor=executor)
     await message.reply(
-        "⏳ Выберите срок или введите свой:",
-        reply_markup=get_deadline_keyboard()
+        "⏳ Выберите срок или введите свой (можно без срока):",
+        reply_markup=get_deadline_keyboard(with_none_option=True)
     )
     await TaskCreation.waiting_for_deadline.set()
 
 @dp.callback_query_handler(lambda c: c.data.startswith("set_deadline_"), state=TaskCreation.waiting_for_deadline)
 async def process_deadline(callback_query: types.CallbackQuery, state: FSMContext):
-    """Обработка выбора дедлайна (предустановленные даты)"""
+    """Обработка выбора дедлайна"""
     if callback_query.data == "set_deadline_custom":
         await callback_query.message.reply("⏳ Введите срок в формате YYYY-MM-DD:")
         return
-
-    deadline = callback_query.data.split("_")[2]
-    await save_task(callback_query, state, deadline)
+    elif callback_query.data == "set_deadline_none":
+        await save_task(callback_query, state, deadline=None)
+    else:
+        deadline = callback_query.data.split("_")[2]
+        await save_task(callback_query, state, deadline)
 
 async def save_task(message_obj, state: FSMContext, deadline: str):
     """Сохранение задачи в БД"""
@@ -186,8 +189,12 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
             f"✅ Задача создана!\n\n"
             f"📌 <b>{task_text}</b>\n"
             f"👤 {executor}\n"
-            f"⏳ {deadline}"
         )
+        if deadline:
+            response += f"⏳ {deadline}"
+        else:
+            response += "⏳ Без срока"
+            
         await message_obj.message.reply(response, parse_mode=ParseMode.HTML)
     except sqlite3.Error as e:
         logger.error(f"Ошибка БД при сохранении задачи: {e}")
@@ -213,8 +220,7 @@ async def status_select_task(message: types.Message):
     """Выбор задачи для изменения статуса"""
     try:
         cursor = conn.cursor()
-        # Важно фильтровать по chat_id, чтобы пользователь видел только свои задачи
-        cursor.execute("SELECT id, task_text, status FROM tasks WHERE chat_id=?", (message.chat.id,))
+        cursor.execute("SELECT id, task_text, status FROM tasks")
         tasks = cursor.fetchall()
 
         if not tasks:
@@ -242,20 +248,31 @@ async def select_new_status(callback_query: types.CallbackQuery):
         
         # Получаем текущий статус задачи
         cursor = conn.cursor()
-        cursor.execute("SELECT task_text, status FROM tasks WHERE id=?", (task_id,))
+        cursor.execute("SELECT task_text, status, deadline FROM tasks WHERE id=?", (task_id,))
         task = cursor.fetchone()
         
         if not task:
             await callback_query.message.reply("⚠ Задача не найдена!")
             return
             
-        task_text, current_status = task
+        task_text, current_status, deadline = task
         
-        await callback_query.message.reply(
+        # Формируем сообщение с информацией о задаче
+        response = (
             f"Задача: {task_text[:100]}{'...' if len(task_text) > 100 else ''}\n"
             f"Текущий статус: {current_status}\n"
-            "Выберите новый статус:",
-            reply_markup=get_status_keyboard(task_id)
+        )
+        
+        if deadline:
+            response += f"Срок выполнения: {deadline}\n"
+        else:
+            response += "Срок выполнения: не установлен\n"
+        
+        response += "Выберите действие:"
+        
+        await callback_query.message.reply(
+            response,
+            reply_markup=get_task_actions_keyboard(task_id)
         )
     except Exception as e:
         logger.error(f"Ошибка при выборе статуса: {str(e)}")
@@ -281,11 +298,6 @@ async def set_status(callback_query: types.CallbackQuery):
             
         old_text, old_status, chat_id = task
         
-        # Дополнительная проверка, что задача принадлежит пользователю
-        if str(chat_id) != str(callback_query.message.chat.id):
-            await callback_query.message.reply("⚠ Вы не можете изменить эту задачу!")
-            return
-        
         # Обновляем статус
         cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status, task_id))
         conn.commit()
@@ -295,7 +307,7 @@ async def set_status(callback_query: types.CallbackQuery):
             f"✅ Статус задачи обновлён!\n\n"
             f"📌 Задача: {old_text[:100]}{'...' if len(old_text) > 100 else ''}\n"
             f"🆔 ID: {task_id}\n"
-            f"🔄 Было: {old_status} → Стало: {new_status}"
+            f"🔄 : {old_status} → : {new_status}"
         )
         
     except sqlite3.Error as e:
@@ -305,81 +317,199 @@ async def set_status(callback_query: types.CallbackQuery):
         logger.error(f"Неожиданная ошибка при обновлении статуса: {str(e)}")
         await callback_query.message.reply("⚠ Не удалось обновить статус. Попробуйте снова.")
 
+# Добавляем обработчики для изменения даты
+@dp.callback_query_handler(lambda c: c.data.startswith("change_date_"))
+async def change_date_start(callback_query: types.CallbackQuery):
+    """Начало процесса изменения даты"""
+    try:
+        task_id = callback_query.data.split("_")[2]
+        await bot.answer_callback_query(callback_query.id)
+        
+        # Сохраняем task_id в FSM
+        await TaskUpdate.waiting_for_new_date.set()
+        await dp.current_state().update_data(task_id=task_id)
+        
+        await callback_query.message.reply(
+            "Выберите новую дату выполнения:",
+            reply_markup=get_deadline_keyboard(with_none_option=True)
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при начале изменения даты: {str(e)}")
+        await callback_query.message.reply("⚠ Ошибка при изменении даты")
+
+@dp.callback_query_handler(lambda c: c.data.startswith("set_deadline_"), state=TaskUpdate.waiting_for_new_date)
+async def process_new_date(callback_query: types.CallbackQuery, state: FSMContext):
+    """Обработка новой даты выполнения"""
+    try:
+        user_data = await state.get_data()
+        task_id = user_data['task_id']
+        
+        if callback_query.data == "set_deadline_custom":
+            await callback_query.message.reply("⏳ Введите новую дату в формате YYYY-MM-DD:")
+            return
+        elif callback_query.data == "set_deadline_none":
+            new_deadline = None
+            response_text = "✅ Дата выполнения удалена"
+        else:
+            new_deadline = callback_query.data.split("_")[2]
+            response_text = f"✅ Новая дата выполнения: {new_deadline}"
+        
+        # Обновляем дату в БД
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE tasks SET deadline=? WHERE id=?",
+            (new_deadline, task_id)
+        )
+        conn.commit()
+        
+        await callback_query.message.reply(response_text)
+        await state.finish()
+        
+    except Exception as e:
+        logger.error(f"Ошибка при изменении даты: {str(e)}")
+        await callback_query.message.reply("⚠ Ошибка при изменении даты")
+    finally:
+        await state.finish()
+
+@dp.message_handler(state=TaskUpdate.waiting_for_new_date)
+async def process_custom_new_date(message: types.Message, state: FSMContext):
+    """Обработка ввода собственной даты"""
+    try:
+        user_data = await state.get_data()
+        task_id = user_data['task_id']
+        
+        if message.text.lower() == "нет":
+            new_deadline = None
+            response_text = "✅ Дата выполнения удалена"
+        else:
+            datetime.strptime(message.text, "%Y-%m-%d")  # Проверка формата
+            new_deadline = message.text.strip()
+            response_text = f"✅ Новая дата выполнения: {new_deadline}"
+        
+        # Обновляем дату в БД
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE tasks SET deadline=? WHERE id=?",
+            (new_deadline, task_id)
+        )
+        conn.commit()
+        
+        await message.reply(response_text)
+        
+    except ValueError:
+        await message.reply("⚠ Ошибка! Введите дату в формате YYYY-MM-DD или 'нет' для удаления даты")
+    except Exception as e:
+        logger.error(f"Ошибка при изменении даты: {str(e)}")
+        await message.reply("⚠ Ошибка при изменении даты")
+    finally:
+        await state.finish()
+
 # ======================
 # РАБОТА С ЗАДАЧАМИ
 # ======================
 
-@dp.message_handler(commands=["newtask"])
-async def new_task_command(message: types.Message):
-    """Создание задачи через команду /newtask"""
-    try:
-        match = re.match(r"^/newtask -([\w\s\d.,!?]+) @([\w\d_]+) -([\d-]+)$", message.text)
-
-        if not match:
-            await message.reply("⚠️ Неверный формат! Используйте: -описание @исполнитель -срок")
-            return
-
-        task_text, user_id, deadline = match.groups()
-
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO tasks (user_id, chat_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-            (f"@{user_id}", message.chat.id, task_text.strip(), deadline.strip())
-        )
-        conn.commit()
-        await message.reply(f"✅ Задача создана: {task_text.strip()} для @{user_id} до {deadline.strip()}")
-    except Exception as e:
-        logger.error(f"Ошибка при создании задачи: {e}")
-        await message.reply(f"⚠ Ошибка при добавлении задачи: {str(e)}")
-
-@dp.message_handler(commands=["status"])
-async def change_status_command(message: types.Message):
-    """Изменение статуса через команду /status"""
-    try:
-        match = re.match(r"^/status (\d+) -([\w\s]+)$", message.text.strip())
-
-        if not match:
-            await message.reply("⚠ Используйте формат: /s ID -новый_статус\nНапример: /s 123 -в работе")
-            return
-
-        task_id, new_status = match.groups()
-
-        cursor = conn.cursor()
-        cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status.strip(), task_id))
-        conn.commit()
-        await message.reply(f"✅ Статус задачи {task_id} обновлён до '{new_status.strip()}'")
-    except Exception as e:
-        logger.error(f"Ошибка при изменении статуса: {e}")
-        await message.reply(f"⚠ Ошибка при изменении статуса: {str(e)}")
+# Глобальная переменная для хранения текущей страницы
+current_page = {}
 
 @dp.message_handler(lambda message: message.text == "📋 Список задач")
 async def list_tasks(message: types.Message):
-    """Просмотр списка задач"""
+    """Просмотр списка задач с пагинацией"""
+    try:
+        user_id = message.from_user.id
+        current_page[user_id] = 0  # Сбрасываем на первую страницу при новом запросе
+        await show_tasks_page(message, user_id, page=0)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка задач: {str(e)}")
+        await message.reply("⚠ Ошибка при получении списка задач.")
+
+async def show_tasks_page(message: types.Message, user_id: int, page: int):
+    """Показать страницу с задачами"""
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, user_id, task_text, status, deadline FROM tasks")
-        tasks = cursor.fetchall()
-
-        if not tasks:
+        # Получаем общее количество задач
+        cursor.execute("SELECT COUNT(*) FROM tasks")
+        total_tasks = cursor.fetchone()[0]
+        
+        if total_tasks == 0:
             await message.reply("📭 У вас нет активных задач.")
             return
+        
+        # Вычисляем общее количество страниц
+        total_pages = (total_tasks - 1) // 10
+        
+        # Получаем задачи для текущей страницы (сортировка по убыванию ID)
+        cursor.execute(
+            "SELECT id, user_id, task_text, status, deadline FROM tasks "
+            "ORDER BY id DESC LIMIT 10 OFFSET ?",
+            (page * 10,)
+        )
+        tasks = cursor.fetchall()
 
+        # Формируем сообщение
         result = []
         for task in tasks:
             task_id, user_id, task_text, status, deadline = task
             result.append(
-                f"🔹 ID: {task_id}\n"
-                f"👤 Исполнитель: {user_id}\n"
-                f"📝 Описание: {task_text}\n"
-                f"🔄 Статус: {status}\n"
-                f"⏳ Срок: {deadline}\n"
+                f"🔹 : {task_id} 👤 : {user_id}\n"
+                f"📝 : {task_text}\n"
+                f"🔄 : {status} ⏳ : {deadline}\n"
                 f"──────────────────"
             )
 
-        await message.reply("\n".join(result))
-    except sqlite3.Error as e:
-        logger.error(f"Ошибка БД при получении задач: {e}")
-        await message.reply("⚠ Ошибка при получении списка задач.")
+        # Создаем клавиатуру пагинации
+        keyboard = InlineKeyboardMarkup(row_width=3)
+        
+        # Кнопки навигации
+        buttons = []
+        if page > 0:
+            buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"tasks_prev_{page}"))
+        
+        buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages+1}", callback_data="tasks_page"))
+        
+        if page < total_pages:
+            buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=f"tasks_next_{page}"))
+        
+        keyboard.row(*buttons)
+        
+        # Отправляем сообщение
+        await message.reply(
+            f"📋 Список задач (страница {page+1} из {total_pages+1}):\n\n" + 
+            "\n".join(result),
+            reply_markup=keyboard
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при отображении страницы задач: {str(e)}")
+        await message.reply("⚠ Ошибка при отображении задач.")
+
+@dp.callback_query_handler(lambda c: c.data.startswith(("tasks_prev_", "tasks_next_")))
+async def process_tasks_pagination(callback_query: types.CallbackQuery):
+    """Обработка переключения страниц"""
+    try:
+        user_id = callback_query.from_user.id
+        action, page = callback_query.data.split("_")[1:3]
+        page = int(page)
+        
+        if action == "prev":
+            new_page = page - 1
+        else:
+            new_page = page + 1
+        
+        # Обновляем текущую страницу
+        current_page[user_id] = new_page
+        
+        # Удаляем старое сообщение
+        await callback_query.message.delete()
+        
+        # Показываем новую страницу
+        await show_tasks_page(callback_query.message, user_id, new_page)
+        
+        await bot.answer_callback_query(callback_query.id)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при переключении страниц: {str(e)}")
+        await callback_query.message.reply("⚠ Ошибка при переключении страниц.")
 
 # ======================
 # ЭКСПОРТ ЗАДАЧ В CSV
@@ -408,7 +538,11 @@ async def export_tasks_to_csv(message: types.Message):
             newline=''
         )
         
-        writer = csv.writer(text_buffer)
+        writer = csv.writer(
+            text_buffer,
+            delimiter=';',  # Указываем нужный разделитель
+            quoting=csv.QUOTE_MINIMAL
+        )
         
         # Заголовки столбцов
         headers = ['ID', 'User ID', 'Chat ID', 'Task Text', 'Status', 'Deadline']
@@ -433,7 +567,7 @@ async def export_tasks_to_csv(message: types.Message):
         
         await message.reply_document(
             document=csv_file,
-            caption="📊 Экспорт всех задач в CSV (Windows-1251)"
+            caption="📊 Экспорт всех задач в CSV"
         )
         
     except Exception as e:
@@ -504,8 +638,8 @@ async def confirm_task_deletion(callback_query: types.CallbackQuery, state: FSMC
     await callback_query.message.reply(
         f"Вы уверены, что хотите удалить задачу?\n\n"
         f"📌 {task_text}\n"
-        f"🔄 Статус: {status}\n"
-        f"⏳ Дедлайн: {deadline}",
+        f"🔄 {status}\n"
+        f"⏳ {deadline}",
         reply_markup=keyboard
     )
     await TaskDeletion.waiting_for_confirmation.set()
@@ -569,7 +703,7 @@ async def check_deadlines():
                 except Exception as e:
                     logger.error(f"Ошибка при отправке напоминания: {e}")
 
-            await asyncio.sleep(3600)  # Проверка раз в час
+            await asyncio.sleep(10800)  # Проверка раз в 3 часа
         except Exception as e:
             logger.error(f"Ошибка в фоновой задаче проверки дедлайнов: {e}")
             await asyncio.sleep(60)
