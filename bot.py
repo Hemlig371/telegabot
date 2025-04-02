@@ -164,6 +164,8 @@ async def process_executor(message: types.Message, state: FSMContext):
 async def process_deadline(callback_query: types.CallbackQuery, state: FSMContext):
     """Обработка выбора дедлайна"""
     if callback_query.data == "set_deadline_custom":
+        # Сохраняем callback_query в состоянии
+        await state.update_data(callback_query=callback_query)
         await callback_query.message.reply("⏳ Введите срок в формате YYYY-MM-DD:")
         return
     elif callback_query.data == "set_deadline_none":
@@ -172,6 +174,26 @@ async def process_deadline(callback_query: types.CallbackQuery, state: FSMContex
         deadline = callback_query.data.split("_")[2]
         await save_task(callback_query, state, deadline)
 
+@dp.message_handler(state=TaskCreation.waiting_for_deadline)
+async def process_custom_deadline(message: types.Message, state: FSMContext):
+    """Обработка ввода собственного срока"""
+    try:
+        datetime.strptime(message.text, "%Y-%m-%d")  # Проверка формата
+        
+        # Получаем сохраненный callback_query из состояния
+        user_data = await state.get_data()
+        callback_query = user_data.get('callback_query')
+        
+        if callback_query:
+            # Используем callback_query для сохранения задачи
+            await save_task(callback_query, state, message.text.strip())
+        else:
+            # Если callback_query не найден, используем message
+            await save_task(message, state, message.text.strip())
+            
+    except ValueError:
+        await message.reply("⚠ Ошибка! Введите дату в формате YYYY-MM-DD.")
+
 async def save_task(message_obj, state: FSMContext, deadline: str):
     """Сохранение задачи в БД"""
     user_data = await state.get_data()
@@ -179,10 +201,16 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
     executor = user_data['executor']
 
     try:
+        # Получаем chat_id в зависимости от типа message_obj
+        if isinstance(message_obj, types.CallbackQuery):
+            chat_id = message_obj.message.chat.id
+        else:  # Это обычное сообщение (types.Message)
+            chat_id = message_obj.chat.id
+
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO tasks (user_id, chat_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-            (executor, message_obj.message.chat.id, task_text, deadline)
+            (executor, chat_id, task_text, deadline)
         )
         conn.commit()
 
@@ -196,21 +224,17 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
         else:
             response += "⏳ Без срока"
             
-        await message_obj.message.reply(response, parse_mode=ParseMode.HTML)
+        # Отправляем ответ в зависимости от типа message_obj
+        if isinstance(message_obj, types.CallbackQuery):
+            await message_obj.message.reply(response, parse_mode=ParseMode.HTML)
+        else:
+            await message_obj.reply(response, parse_mode=ParseMode.HTML)
     except sqlite3.Error as e:
         logger.error(f"Ошибка БД при сохранении задачи: {e}")
-        await message_obj.message.reply(f"⚠ Ошибка при сохранении задачи: {str(e)}")
+        reply_target = message_obj.message if isinstance(message_obj, types.CallbackQuery) else message_obj
+        await reply_target.reply(f"⚠ Ошибка при сохранении задачи: {str(e)}")
     finally:
         await state.finish()
-
-@dp.message_handler(state=TaskCreation.waiting_for_deadline)
-async def process_custom_deadline(message: types.Message, state: FSMContext):
-    """Обработка ввода собственного срока"""
-    try:
-        datetime.strptime(message.text, "%Y-%m-%d")  # Проверка формата
-        await save_task(message, state, message.text.strip())
-    except ValueError:
-        await message.reply("⚠ Ошибка! Введите дату в формате YYYY-MM-DD.")
 
 # ======================
 # ИЗМЕНЕНИЕ СТАТУСА
