@@ -302,11 +302,10 @@ async def process_manual_task_id_status(message: types.Message, state: FSMContex
     except ValueError:
         await message.reply("⚠ Введите числовой ID задачи!")
 
-async def show_status_options(message_obj):
-    """Показать варианты статусов"""
+async def show_status_options(message_obj, task_id):
     keyboard = InlineKeyboardMarkup(row_width=2)
     statuses = ["новая", "в работе", "ожидает доклада", "исполнено"]
-    buttons = [InlineKeyboardButton(status, callback_data=f"set_status_{status}") for status in statuses]
+    buttons = [InlineKeyboardButton(status, callback_data=f"set_status_{task_id}_{status}") for status in statuses]
     keyboard.add(*buttons)
     await message_obj.reply("📌 Выберите новый статус:", reply_markup=keyboard)
 
@@ -314,7 +313,7 @@ async def show_status_options(message_obj):
 async def process_status_update(callback_query: types.CallbackQuery, state: FSMContext):
     """Обработка изменения статуса"""
     try:
-        new_status = callback_query.data.split("_")[2]
+        new_status = callback_query.data.split("_")[3]
         user_data = await state.get_data()
         task_id = user_data['task_id']
         
