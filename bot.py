@@ -107,6 +107,7 @@ class TaskCreation(StatesGroup):
 
 class TaskUpdate(StatesGroup):
     waiting_for_status_task_id = State()
+    waiting_for_deadline_task_id = State()
     waiting_for_deadline = State()
 
 class TaskDeletion(StatesGroup):
@@ -480,9 +481,10 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
         cursor.execute("""
             SELECT id, user_id, task_text, status, deadline 
             FROM tasks 
+            WHERE chat_id=?
             ORDER BY id DESC 
             LIMIT 10 OFFSET ?
-        """, (page * 10))
+        """, (message.chat.id, page * 10))
         tasks = cursor.fetchall()
 
         # Формируем сообщение
@@ -588,7 +590,7 @@ async def export_tasks_to_csv(message: types.Message):
         # Используем TextIOWrapper с нужной кодировкой
         text_buffer = io.TextIOWrapper(
             output,
-            encoding='windows-1251',
+            encoding='utf-8-sig',
             errors='replace',  # заменяем некодируемые символы
             newline=''
         )
@@ -632,11 +634,6 @@ async def export_tasks_to_csv(message: types.Message):
 # ======================
 # УДАЛЕНИЕ ЗАДАЧ
 # ======================
-
-class TaskDeletion(StatesGroup):
-    waiting_for_task_selection = State()
-    waiting_for_confirmation = State()
-    waiting_for_manual_id = State()
 
 @dp.message_handler(lambda message: message.text == "🗑 Удалить задачу")
 async def delete_task_start(message: types.Message):
@@ -682,7 +679,7 @@ async def process_manual_task_id_delete(message: types.Message, state: FSMContex
     try:
         task_id = int(message.text)
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id)
+        cursor.execute("SELECT id FROM tasks WHERE id=? AND chat_id=?", (task_id, message.chat.id))
         if not cursor.fetchone():
             await message.reply("⚠ Задача с таким ID не найдена или не принадлежит вам!")
             await state.finish()
