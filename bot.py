@@ -217,50 +217,84 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
 # ИЗМЕНЕНИЕ СТАТУСА
 # ======================
 
-@dp.callback_query_handler(lambda c: c.data.startswith("change_status_"))
-async def select_new_status(callback_query: types.CallbackQuery):
-    """Выбор нового статуса для задачи"""
+@dp.message_handler(lambda message: message.text == "🔄 Изменить статус")
+async def status_select_task(message: types.Message):
+    """Выбор задачи для изменения статуса"""
     try:
-        task_id = callback_query.data.split("_")[2]
-        await bot.answer_callback_query(callback_query.id)
-        
-        # Получаем текущий статус задачи
         cursor = conn.cursor()
-        cursor.execute("SELECT task_text, status, deadline FROM tasks WHERE id=?", (task_id,))
-        task = cursor.fetchone()
-        
-        if not task:
-            await callback_query.message.reply("⚠ Задача не найдена!")
+        cursor.execute("SELECT id, task_text, status FROM tasks ORDER BY id DESC LIMIT 5")
+        tasks = cursor.fetchall()
+
+        if not tasks:
+            await message.reply("📭 У вас нет активных задач.")
             return
-            
-        task_text, current_status, deadline = task
+
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        for task_id, task_text, status in tasks:
+            keyboard.add(InlineKeyboardButton(
+                f"{task_text[:30]}... (ID: {task_id}, статус: {status})", 
+                callback_data=f"change_status_{task_id}"
+            ))
         
-        # Формируем сообщение с информацией о задаче
-        response = (
-            f"Задача: {task_text[:100]}{'...' if len(task_text) > 100 else ''}\n"
-            f"Текущий статус: {current_status}\n"
-        )
-        
-        if deadline:
-            response += f"Срок выполнения: {deadline}\n"
-        else:
-            response += "Срок выполнения: не установлен\n"
-        
-        response += "Выберите новый статус:"
-        
-        # Отправляем клавиатуру выбора статуса сразу
-        await callback_query.message.reply(
-            response,
-            reply_markup=get_status_keyboard(task_id)
-        )
+        keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="enter_task_id_manually"))
+
+        await message.reply("Выберите задачу для изменения статуса или введите ID вручную:", reply_markup=keyboard)
     except Exception as e:
-        logger.error(f"Ошибка при выборе статуса: {str(e)}")
-        await callback_query.message.reply("⚠ Ошибка при выборе задачи. Попробуйте снова.")
+        logger.error(f"Ошибка при получении списка задач: {str(e)}")
+        await message.reply("⚠ Ошибка при получении списка задач. Попробуйте позже.")
+
+@dp.callback_query_handler(lambda c: c.data == "enter_task_id_manually")
+async def ask_for_task_id(callback_query: types.CallbackQuery):
+    """Запрос ID задачи для ручного ввода"""
+    await bot.answer_callback_query(callback_query.id)
+    await callback_query.message.reply("✏️ Введите ID задачи:")
+    await TaskDeletion.waiting_for_task_selection.set()  # Используем то же состояние, что и для удаления
+
+@dp.message_handler(state=TaskDeletion.waiting_for_task_selection)
+async def process_manual_task_id(message: types.Message, state: FSMContext):
+    """Обработка введенного вручную ID задачи"""
+    try:
+        task_id = int(message.text)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
+        if not cursor.fetchone():
+            await message.reply("⚠ Задача с таким ID не найдена!")
+            await state.finish()
+            return
+        
+        # Предлагаем выбрать действие для задачи
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(
+            InlineKeyboardButton("🔄 Изменить статус", callback_data=f"change_status_{task_id}"),
+            InlineKeyboardButton("🗑 Удалить задачу", callback_data=f"delete_task_{task_id}")
+        )
+        
+        await message.reply(f"Выберите действие для задачи ID {task_id}:", reply_markup=keyboard)
+        await state.finish()
+    except ValueError:
+        await message.reply("⚠ Пожалуйста, введите числовой ID задачи!")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке ID задачи: {e}")
+        await message.reply("⚠ Произошла ошибка. Попробуйте снова.")
+        await state.finish()
 
 # ======================
 # РАБОТА С ЗАДАЧАМИ
 # ======================
 
+current_page = {}
+
+@dp.message_handler(lambda message: message.text == "📋 Список задач")
+async def list_tasks(message: types.Message):
+    """Просмотр списка задач с пагинацией"""
+    try:
+        user_id = message.from_user.id
+        current_page[user_id] = 0  # Сбрасываем на первую страницу при новом запросе
+        await show_tasks_page(message, user_id, page=0)
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка задач: {str(e)}")
+        await message.reply("⚠ Ошибка при получении списка задач.")
+      
 async def show_tasks_page(message: types.Message, user_id: int, page: int):
     """Показать страницу с задачами"""
     try:
@@ -424,65 +458,100 @@ async def export_tasks_to_csv(message: types.Message):
 class TaskDeletion(StatesGroup):
     waiting_for_task_selection = State()
     waiting_for_confirmation = State()
+    waiting_for_manual_id = State()
 
 @dp.message_handler(lambda message: message.text == "🗑 Удалить задачу")
 async def delete_task_start(message: types.Message):
-    """Начало процесса удаления задачи"""
+    """Начало процесса удаления задачи - показывает 5 последних задач"""
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, task_text FROM tasks WHERE chat_id=?", (message.chat.id,))
+        cursor.execute("""
+            SELECT id, task_text, status 
+            FROM tasks
+            ORDER BY id DESC 
+            LIMIT 5
+        """, (message.chat.id,))
         tasks = cursor.fetchall()
 
         if not tasks:
             await message.reply("📭 У вас нет задач для удаления.")
             return
 
-        keyboard = InlineKeyboardMarkup()
-        for task_id, task_text in tasks:
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        for task_id, task_text, status in tasks:
             keyboard.add(InlineKeyboardButton(
-                f"{task_text[:20]}... (ID: {task_id})", 
+                f"{task_text[:30]}... (ID: {task_id}, статус: {status})", 
                 callback_data=f"delete_task_{task_id}"
             ))
+        
+        keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="enter_task_id_manually"))
 
-        await message.reply("Выберите задачу для удаления:", reply_markup=keyboard)
+        await message.reply("Выберите задачу для удаления или введите ID вручную:", reply_markup=keyboard)
         await TaskDeletion.waiting_for_task_selection.set()
     except Exception as e:
         logger.error(f"Ошибка при выборе задачи для удаления: {e}")
         await message.reply("⚠ Ошибка при получении списка задач.")
 
+@dp.callback_query_handler(lambda c: c.data == "enter_task_id_manually", state=TaskDeletion.waiting_for_task_selection)
+async def ask_for_manual_task_id(callback_query: types.CallbackQuery):
+    """Запрос ручного ввода ID задачи"""
+    await bot.answer_callback_query(callback_query.id)
+    await callback_query.message.reply("✏️ Введите ID задачи для удаления:")
+    await TaskDeletion.waiting_for_manual_id.set()
+
+@dp.message_handler(state=TaskDeletion.waiting_for_manual_id)
+async def process_manual_task_id(message: types.Message, state: FSMContext):
+    """Обработка ручного ввода ID задачи"""
+    try:
+        task_id = int(message.text)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id))
+        if not cursor.fetchone():
+            await message.reply("⚠ Задача с таким ID не найдена")
+            await state.finish()
+            return
+        
+        await state.update_data(task_id=task_id)
+        await show_delete_confirmation(message, task_id)
+    except ValueError:
+        await message.reply("⚠ Пожалуйста, введите числовой ID задачи!")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке ручного ввода ID: {e}")
+        await message.reply("⚠ Произошла ошибка. Попробуйте снова.")
+        await state.finish()
+
 @dp.callback_query_handler(lambda c: c.data.startswith("delete_task_"), state=TaskDeletion.waiting_for_task_selection)
-async def confirm_task_deletion(callback_query: types.CallbackQuery, state: FSMContext):
-    """Подтверждение удаления задачи"""
+async def select_task_for_deletion(callback_query: types.CallbackQuery, state: FSMContext):
+    """Обработка выбора задачи для удаления"""
     task_id = callback_query.data.split("_")[2]
     await bot.answer_callback_query(callback_query.id)
     
-    # Сохраняем ID задачи в состоянии
     await state.update_data(task_id=task_id)
-    
-    # Получаем информацию о задаче
+    await show_delete_confirmation(callback_query.message, task_id)
+
+async def show_delete_confirmation(message_obj, task_id):
+    """Показать подтверждение удаления (общая функция)"""
     cursor = conn.cursor()
     cursor.execute("SELECT task_text, status, deadline FROM tasks WHERE id=?", (task_id,))
     task_info = cursor.fetchone()
     
     if not task_info:
-        await callback_query.message.reply("⚠ Задача не найдена!")
-        await state.finish()
+        await message_obj.reply("⚠ Задача не найдена!")
         return
     
     task_text, status, deadline = task_info
     
-    # Клавиатура подтверждения
     keyboard = InlineKeyboardMarkup()
     keyboard.row(
         InlineKeyboardButton("✅ Да, удалить", callback_data="confirm_deletion"),
         InlineKeyboardButton("❌ Нет, отменить", callback_data="cancel_deletion")
     )
     
-    await callback_query.message.reply(
+    await message_obj.reply(
         f"Вы уверены, что хотите удалить задачу?\n\n"
         f"📌 {task_text}\n"
         f"🔄 {status}\n"
-        f"⏳ {deadline}",
+        f"⏳ {deadline if deadline else 'нет срока'}",
         reply_markup=keyboard
     )
     await TaskDeletion.waiting_for_confirmation.set()
@@ -495,11 +564,9 @@ async def execute_task_deletion(callback_query: types.CallbackQuery, state: FSMC
     
     try:
         cursor = conn.cursor()
-        # Получаем информацию о задаче перед удалением
         cursor.execute("SELECT task_text FROM tasks WHERE id=?", (task_id,))
         task_text = cursor.fetchone()[0]
         
-        # Удаляем задачу
         cursor.execute("DELETE FROM tasks WHERE id=?", (task_id,))
         conn.commit()
         
