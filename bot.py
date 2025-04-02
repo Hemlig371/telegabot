@@ -291,7 +291,7 @@ async def process_manual_task_id_status(message: types.Message, state: FSMContex
     try:
         task_id = int(message.text)
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id))
+        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
         if not cursor.fetchone():
             await message.reply("⚠ Задача не найдена!")
             return
@@ -390,7 +390,7 @@ async def process_manual_task_id(message: types.Message, state: FSMContext):
     try:
         task_id = int(message.text)
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id)
+        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
         if not cursor.fetchone():
             await message.reply("⚠ Задача не найдена!")
             return
@@ -498,7 +498,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
             FROM tasks 
             ORDER BY id DESC 
             LIMIT 5 OFFSET ?
-        """, (page * 5))
+        """, (page * 5,))
         tasks = cursor.fetchall()
 
         # Формируем сообщение
@@ -552,14 +552,6 @@ async def process_tasks_pagination(callback_query: types.CallbackQuery):
         # Получаем chat_id из callback_query
         chat_id = callback_query.message.chat.id
         
-        # Удаляем предыдущее сообщение
-        try:
-            prev_message_id = current_page.get(f"{user_id}_message_id")
-            if prev_message_id:
-                await bot.delete_message(chat_id=chat_id, message_id=prev_message_id)
-        except Exception as e:
-            logger.warning(f"Не удалось удалить сообщение: {e}")
-        
         # Создаем fake message object для передачи в show_tasks_page
         class FakeMessage:
             def __init__(self, chat_id):
@@ -570,6 +562,14 @@ async def process_tasks_pagination(callback_query: types.CallbackQuery):
         
         # Показываем новую страницу
         sent_message = await show_tasks_page(fake_message, user_id, page)
+
+        # Удаляем предыдущее сообщение
+        try:
+            prev_message_id = current_page.get(f"{user_id}_message_id")
+            if prev_message_id:
+                await bot.delete_message(chat_id=chat_id, message_id=prev_message_id)
+        except Exception as e:
+            logger.warning(f"Не удалось удалить сообщение: {e}")
         
         # Обновляем ID сообщения в хранилище
         if sent_message:
@@ -695,7 +695,7 @@ async def process_manual_task_id_delete(message: types.Message, state: FSMContex
     try:
         task_id = int(message.text)
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id)
+        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
         if not cursor.fetchone():
             await message.reply("⚠ Задача с таким ID не найдена или не принадлежит вам!")
             await state.finish()
