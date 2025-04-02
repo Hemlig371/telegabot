@@ -112,6 +112,8 @@ class TaskCreation(StatesGroup):
     waiting_for_title = State()
     waiting_for_executor = State()
     waiting_for_deadline = State()
+
+class TaskUpdate(StatesGroup):
     waiting_for_new_date = State()
 
 # ======================
