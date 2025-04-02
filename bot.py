@@ -105,11 +105,6 @@ class TaskCreation(StatesGroup):
     waiting_for_executor = State()
     waiting_for_deadline = State()
 
-class TaskUpdate(StatesGroup):
-    waiting_for_status_task_id = State()
-    waiting_for_deadline_task_id = State()
-    waiting_for_deadline = State()
-
 class TaskDeletion(StatesGroup):
     waiting_for_task_selection = State()
     waiting_for_confirmation = State()
@@ -240,100 +235,99 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
 # ИЗМЕНЕНИЕ СТАТУСА
 # ======================
 
+class StatusUpdate(StatesGroup):
+    waiting_for_task_selection = State()  # Для выбора задачи
+    waiting_for_status_choice = State()   # Для выбора статуса
+
 @dp.message_handler(lambda message: message.text == "🔄 Изменить статус")
 async def status_select_task(message: types.Message):
-    """Выбор задачи для изменения статуса"""
+    """Показ списка задач для изменения статуса"""
     try:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT id, task_text, status 
             FROM tasks 
-            WHERE chat_id=?
             ORDER BY id DESC 
             LIMIT 5
         """, (message.chat.id,))
         tasks = cursor.fetchall()
 
         if not tasks:
-            await message.reply("📭 У вас нет активных задач.")
+            await message.reply("📭 У вас нет задач для изменения статуса.")
             return
 
         keyboard = InlineKeyboardMarkup(row_width=1)
         for task_id, task_text, status in tasks:
             keyboard.add(InlineKeyboardButton(
-                f"{task_text[:30]}... (ID: {task_id}, статус: {status})", 
-                callback_data=f"change_status_{task_id}"
+                f"{task_text[:30]}... (ID: {task_id}, текущий: {status})", 
+                callback_data=f"status_task_{task_id}"
             ))
         
-        keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="enter_task_id_manually_status"))
+        keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="status_manual_id"))
 
         await message.reply("Выберите задачу для изменения статуса:", reply_markup=keyboard)
+        await StatusUpdate.waiting_for_task_selection.set()
     except Exception as e:
-        logger.error(f"Ошибка при получении списка задач: {str(e)}")
-        await message.reply("⚠ Ошибка при получении списка задач. Попробуйте позже.")
+        logger.error(f"Ошибка при получении списка задач: {e}")
+        await message.reply("⚠ Ошибка при получении списка задач")
 
-@dp.callback_query_handler(lambda c: c.data == "enter_task_id_manually_status")
-async def ask_for_task_id_status(callback_query: types.CallbackQuery):
-    """Запрос ID задачи для ручного ввода при изменении статуса"""
-    await bot.answer_callback_query(callback_query.id)
-    await callback_query.message.reply("✏️ Введите ID задачи для изменения статуса:")
-    await TaskUpdate.waiting_for_status_task_id.set()
+@dp.callback_query_handler(lambda c: c.data.startswith("status_task_"), state=StatusUpdate.waiting_for_task_selection)
+async def process_selected_task_status(callback_query: types.CallbackQuery, state: FSMContext):
+    """Обработка выбранной задачи для изменения статуса"""
+    task_id = callback_query.data.split("_")[-1]
+    await state.update_data(task_id=task_id)
+    await show_status_options(callback_query.message)
+    await StatusUpdate.waiting_for_status_choice.set()
 
-@dp.message_handler(state=TaskUpdate.waiting_for_status_task_id)
+@dp.callback_query_handler(lambda c: c.data == "status_manual_id", state=StatusUpdate.waiting_for_task_selection)
+async def ask_for_manual_id_status(callback_query: types.CallbackQuery):
+    """Запрос ручного ввода ID для изменения статуса"""
+    await callback_query.message.reply("✏️ Введите ID задачи:")
+    await StatusUpdate.waiting_for_task_selection.set()
+
+@dp.message_handler(state=StatusUpdate.waiting_for_task_selection)
 async def process_manual_task_id_status(message: types.Message, state: FSMContext):
-    """Обработка введенного вручную ID задачи для изменения статуса"""
+    """Обработка ручного ввода ID задачи для изменения статуса"""
     try:
         task_id = int(message.text)
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM tasks WHERE id=? AND chat_id=?", (task_id, message.chat.id))
         if not cursor.fetchone():
-            await message.reply("⚠ Задача с таким ID не найдена или не принадлежит вам!")
-            await state.finish()
+            await message.reply("⚠ Задача не найдена!")
             return
         
-        await state.finish()
-        await show_status_keyboard(message, task_id)
+        await state.update_data(task_id=task_id)
+        await show_status_options(message)
+        await StatusUpdate.waiting_for_status_choice.set()
     except ValueError:
-        await message.reply("⚠ Пожалуйста, введите числовой ID задачи!")
-    except Exception as e:
-        logger.error(f"Ошибка при обработке ID задачи: {e}")
-        await message.reply("⚠ Произошла ошибка. Попробуйте снова.")
-        await state.finish()
+        await message.reply("⚠ Введите числовой ID задачи!")
 
-async def show_status_keyboard(message_obj, task_id):
-    """Показать клавиатуру выбора статуса"""
-    cursor = conn.cursor()
-    cursor.execute("SELECT task_text, status FROM tasks WHERE id=?", (task_id,))
-    task = cursor.fetchone()
-    
-    if not task:
-        await message_obj.reply("⚠ Задача не найдена!")
-        return
-    
-    task_text, current_status = task
-    
-    await message_obj.reply(
-        f"Задача: {task_text}\n"
-        f"Текущий статус: {current_status}\n"
-        "Выберите новый статус:",
-        reply_markup=get_status_keyboard(task_id)
-    )
+async def show_status_options(message_obj):
+    """Показать варианты статусов"""
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    statuses = ["новая", "в работе", "ожидает доклада", "исполнено"]
+    buttons = [InlineKeyboardButton(status, callback_data=f"set_status_{status}") for status in statuses]
+    keyboard.add(*buttons)
+    await message_obj.reply("📌 Выберите новый статус:", reply_markup=keyboard)
 
-@dp.callback_query_handler(lambda c: c.data.startswith("set_status_"))
-async def set_status(callback_query: types.CallbackQuery):
-    """Установка нового статуса задачи"""
+@dp.callback_query_handler(lambda c: c.data.startswith("set_status_"), state=StatusUpdate.waiting_for_status_choice)
+async def process_status_update(callback_query: types.CallbackQuery, state: FSMContext):
+    """Обработка изменения статуса"""
     try:
-        _, task_id, new_status = callback_query.data.split('_')
-        await bot.answer_callback_query(callback_query.id)
+        new_status = callback_query.data.split("_")[2]
+        user_data = await state.get_data()
+        task_id = user_data['task_id']
         
         cursor = conn.cursor()
         cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status, task_id))
         conn.commit()
         
-        await callback_query.message.reply(f"✅ Статус задачи {task_id} изменён на '{new_status}'")
+        await callback_query.message.reply(f"✅ Статус задачи {task_id} изменен на '{new_status}'")
+        await state.finish()
     except Exception as e:
-        logger.error(f"Ошибка при обновлении статуса: {e}")
+        logger.error(f"Ошибка при изменении статуса: {e}")
         await callback_query.message.reply("⚠ Ошибка при изменении статуса")
+        await state.finish()
 
 # ======================
 # ИЗМЕНЕНИЕ СРОКА
@@ -351,8 +345,7 @@ async def deadline_select_task(message: types.Message):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT id, task_text, deadline 
-            FROM tasks 
-            WHERE chat_id=?
+            FROM tasks
             ORDER BY id DESC 
             LIMIT 5
         """, (message.chat.id,))
@@ -365,7 +358,7 @@ async def deadline_select_task(message: types.Message):
         keyboard = InlineKeyboardMarkup(row_width=1)
         for task_id, task_text, deadline in tasks:
             keyboard.add(InlineKeyboardButton(
-                f"{task_text[:30]}... (ID: {task_id})", 
+                f"{task_text[:30]}... (ID: {task_id}, Срок: {deadline})", 
                 callback_data=f"deadline_task_{task_id}"
             ))
         
@@ -417,7 +410,7 @@ async def show_deadline_options(message_obj):
 async def process_deadline_choice(callback_query: types.CallbackQuery, state: FSMContext):
     """Обработка выбора типа срока"""
     if callback_query.data == "set_deadline_custom":
-        await callback_query.message.reply("📅 Введите дату в формате ГГГГ-ММ-ДД:")
+        await callback_query.message.reply("📅 Введите дату в формате YYYY-MM-DD:")
         await TaskUpdate.waiting_for_custom_deadline.set()
     else:
         user_data = await state.get_data()
@@ -491,7 +484,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
             return await message.reply("📭 У вас нет активных задач.")
         
         # Вычисляем общее количество страниц
-        total_pages = (total_tasks - 1) // 10
+        total_pages = (total_tasks - 1) // 5
         
         # Проверяем, что запрашиваемая страница существует
         if page < 0:
@@ -505,8 +498,8 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
             FROM tasks 
             WHERE chat_id=?
             ORDER BY id DESC 
-            LIMIT 10 OFFSET ?
-        """, (message.chat.id, page * 10))
+            LIMIT 5 OFFSET ?
+        """, (message.chat.id, page * 5))
         tasks = cursor.fetchall()
 
         # Формируем сообщение
@@ -581,8 +574,23 @@ async def process_tasks_pagination(callback_query: types.CallbackQuery):
         # Обновляем текущую страницу
         current_page[user_id] = page
         
-        # Показываем новую страницу (редактируем существующее сообщение)
-        await show_tasks_page(callback_query.message, user_id, page)
+        # Удаляем предыдущее сообщение
+        try:
+            prev_message_id = current_page.get(f"{user_id}_message_id")
+            if prev_message_id:
+                await bot.delete_message(
+                    chat_id=callback_query.message.chat.id,
+                    message_id=prev_message_id
+                )
+        except Exception as e:
+            logger.warning(f"Не удалось удалить сообщение: {e}")
+        
+        # Показываем новую страницу (отправляем новое сообщение)
+        sent_message = await show_tasks_page(callback_query.message, user_id, page)
+        
+        # Обновляем ID сообщения в хранилище
+        if sent_message:
+            current_page[f"{user_id}_message_id"] = sent_message.message_id
         
         await bot.answer_callback_query(callback_query.id)
         
