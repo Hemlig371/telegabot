@@ -116,6 +116,11 @@ class TaskCreation(StatesGroup):
 class TaskUpdate(StatesGroup):
     waiting_for_new_date = State()
 
+class TaskDeletion(StatesGroup):
+    waiting_for_task_selection = State()
+    waiting_for_confirmation = State()
+    waiting_for_manual_id = State()
+
 # ======================
 # ОБРАБОТЧИКИ КОМАНД
 # ======================
