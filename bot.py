@@ -329,7 +329,7 @@ async def select_new_status_for_task(callback_or_message, task_id=None):
         await message.reply("⚠ Ошибка при выборе задачи. Попробуйте снова.")
 
 # ======================
-# РАБОТА С ЗАДАЧАМИ
+# СПИСОК ЗАДАЧ
 # ======================
 
 current_page = {}
@@ -340,13 +340,18 @@ async def list_tasks(message: types.Message):
     try:
         user_id = message.from_user.id
         current_page[user_id] = 0  # Сбрасываем на первую страницу при новом запросе
-        await show_tasks_page(message, user_id, page=0)
+        
+        # Отправляем первое сообщение
+        sent_message = await show_tasks_page(message, user_id, page=0)
+        
+        # Сохраняем ID сообщения для последующего редактирования
+        current_page[f"{user_id}_message_id"] = sent_message.message_id
     except Exception as e:
         logger.error(f"Ошибка при получении списка задач: {str(e)}")
         await message.reply("⚠ Ошибка при получении списка задач.")
-      
+
 async def show_tasks_page(message: types.Message, user_id: int, page: int):
-    """Показать страницу с задачами"""
+    """Показать страницу с задачами и вернуть отправленное сообщение"""
     try:
         cursor = conn.cursor()
         # Получаем общее количество задач
@@ -354,8 +359,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
         total_tasks = cursor.fetchone()[0]
         
         if total_tasks == 0:
-            await message.reply("📭 У вас нет активных задач.")
-            return
+            return await message.reply("📭 У вас нет активных задач.")
         
         # Вычисляем общее количество страниц
         total_pages = (total_tasks - 1) // 10
@@ -366,12 +370,13 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
         elif page > total_pages:
             page = total_pages
         
-        # Получаем задачи для текущей страницы (сортировка по убыванию ID)
-        cursor.execute(
-            "SELECT id, user_id, task_text, status, deadline FROM tasks "
-            "ORDER BY id DESC LIMIT 10 OFFSET ?",
-            (page * 10,)
-        )
+        # Получаем задачи для текущей страницы
+        cursor.execute("""
+            SELECT id, user_id, task_text, status, deadline 
+            FROM tasks
+            ORDER BY id DESC 
+            LIMIT 10 OFFSET ?
+        """, (page * 10))
         tasks = cursor.fetchall()
 
         # Формируем сообщение
@@ -387,8 +392,6 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
 
         # Создаем клавиатуру пагинации
         keyboard = InlineKeyboardMarkup(row_width=3)
-        
-        # Кнопки навигации
         buttons = []
         if page > 0:
             buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"tasks_prev_{page-1}"))
@@ -400,23 +403,42 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
         
         keyboard.row(*buttons)
         
-        # Если это первое сообщение - отправляем новое, иначе редактируем существующее
-        if isinstance(message, types.Message):
-            await message.reply(
-                f"📋 Список задач (страница {page+1} из {total_pages+1}):\n\n" + 
-                "\n".join(result),
-                reply_markup=keyboard
-            )
-        else:
-            await message.edit_text(
-                f"📋 Список задач (страница {page+1} из {total_pages+1}):\n\n" + 
-                "\n".join(result),
-                reply_markup=keyboard
-            )
+        # Получаем ID предыдущего сообщения (если есть)
+        prev_message_id = current_page.get(f"{user_id}_message_id")
+        
+        if prev_message_id:
+            try:
+                # Редактируем существующее сообщение
+                await bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=prev_message_id,
+                    text=f"📋 Список задач (страница {page+1} из {total_pages+1}):\n\n" + "\n".join(result),
+                    reply_markup=keyboard
+                )
+                return types.Message(
+                    message_id=prev_message_id,
+                    chat=message.chat,
+                    date=datetime.now()
+                )
+            except Exception as e:
+                logger.warning(f"Не удалось отредактировать сообщение: {e}")
+                # Если не удалось отредактировать, удаляем старое и отправляем новое
+                try:
+                    await bot.delete_message(chat_id=message.chat.id, message_id=prev_message_id)
+                except:
+                    pass
+        
+        # Отправляем новое сообщение, если не было предыдущего или не удалось отредактировать
+        sent_message = await message.reply(
+            f"📋 Список задач (страница {page+1} из {total_pages+1}):\n\n" + "\n".join(result),
+            reply_markup=keyboard
+        )
+        return sent_message
         
     except Exception as e:
         logger.error(f"Ошибка при отображении страницы задач: {str(e)}")
         await message.reply("⚠ Ошибка при отображении задач.")
+        return None
 
 @dp.callback_query_handler(lambda c: c.data.startswith(("tasks_prev_", "tasks_next_")))
 async def process_tasks_pagination(callback_query: types.CallbackQuery):
@@ -429,10 +451,7 @@ async def process_tasks_pagination(callback_query: types.CallbackQuery):
         # Обновляем текущую страницу
         current_page[user_id] = page
         
-        # Удаляем старое сообщение
-        await callback_query.message.delete()
-        
-        # Показываем новую страницу
+        # Показываем новую страницу (редактируем существующее сообщение)
         await show_tasks_page(callback_query.message, user_id, page)
         
         await bot.answer_callback_query(callback_query.id)
@@ -520,7 +539,7 @@ async def delete_task_start(message: types.Message):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT id, task_text, status 
-            FROM tasks 
+            FROM tasks
             ORDER BY id DESC 
             LIMIT 5
         """)
@@ -557,7 +576,7 @@ async def process_manual_task_id_delete(message: types.Message, state: FSMContex
     try:
         task_id = int(message.text)
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM tasks WHERE id=? AND chat_id=?", (task_id, message.chat.id))
+        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id)
         if not cursor.fetchone():
             await message.reply("⚠ Задача с таким ID не найдена или не принадлежит вам!")
             await state.finish()
@@ -597,6 +616,7 @@ async def show_delete_confirmation(message_obj, task_id):
         InlineKeyboardButton("❌ Нет, отменить", callback_data="cancel_deletion")
     )
     
+    # Отправляем новое сообщение с подтверждением
     await message_obj.reply(
         f"Вы уверены, что хотите удалить задачу?\n\n"
         f"📌 {task_text}\n"
@@ -624,6 +644,7 @@ async def execute_task_deletion(callback_query: types.CallbackQuery):
         cursor.execute("DELETE FROM tasks WHERE id=?", (task_id,))
         conn.commit()
         
+        # Редактируем сообщение с подтверждением
         await callback_query.message.edit_text(
             f"✅ Задача успешно удалена:\n"
             f"ID: {task_id}\n"
