@@ -47,7 +47,7 @@ def init_db():
         
         cursor.execute('''CREATE TABLE IF NOT EXISTS tasks (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        user_id INTEGER,
+                        user_id TEXT,
                         chat_id INTEGER,
                         task_text TEXT,
                         status TEXT DEFAULT 'новая',
@@ -324,7 +324,7 @@ async def status_select_task(message: types.Message):
         cursor.execute("""
             SELECT id, task_text, status 
             FROM tasks
-            WHERE user_id=?
+            WHERE chat_id=?
             ORDER BY id DESC 
             LIMIT 5
         """, (message.from_user.id,))
@@ -431,7 +431,7 @@ async def deadline_select_task(message: types.Message):
         cursor.execute("""
             SELECT id, task_text, deadline 
             FROM tasks
-            WHERE user_id=?
+            WHERE chat_id=?
             ORDER BY id DESC 
             LIMIT 5
         """, (message.from_user.id,))
@@ -566,7 +566,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
     try:
         cursor = conn.cursor()
         # Получаем общее количество задач
-        cursor.execute("SELECT COUNT(*) FROM tasks")
+        cursor.execute("SELECT COUNT(*) FROM tasks WHERE chat_id=?", (message.from_user.id)
         total_tasks = cursor.fetchone()[0]
         
         if total_tasks == 0:
@@ -585,7 +585,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
         cursor.execute("""
             SELECT id, user_id, task_text, status, deadline 
             FROM tasks 
-            WHERE user_id=?
+            WHERE chat_id=?
             ORDER BY id DESC 
             LIMIT 5 OFFSET ?
         """, (message.from_user.id, page * 5))
@@ -687,7 +687,7 @@ async def export_tasks_to_csv(message: types.Message):
     try:
         cursor = conn.cursor()
         cursor.execute(""" SELECT id, 
-                              chat_id as "Исполнитель", 
+                              user_id as "Исполнитель", 
                               task_text as "Задача", 
                               status as "Статус", 
                               deadline as "Срок"
