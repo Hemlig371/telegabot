@@ -72,7 +72,8 @@ menu_keyboard.add(
     KeyboardButton("⏳ Изменить срок"),
     KeyboardButton("📋 Список задач"),
     KeyboardButton("📤 Экспорт задач"),
-    KeyboardButton("🗑 Удалить задачу")
+    KeyboardButton("🗑 Удалить задачу"),
+    KeyboardButton("📤 Экспорт задач (с удаленными)")
 )
 
 # Клавиатура выбора даты
@@ -97,7 +98,7 @@ def get_deadline_keyboard(with_none_option=False):
 # Клавиатура выбора статуса
 def get_status_keyboard(task_id):
     keyboard = InlineKeyboardMarkup(row_width=2)
-    statuses = ["новая", "в работе", "ожидает доклада", "исполнено"]
+    statuses = ["новая", "в работе", "ожидает доклада", "исполнено", "удалено"]
     buttons = [InlineKeyboardButton(status, callback_data=f"set_status_{task_id}_{status}") for status in statuses]
     keyboard.add(*buttons)
     return keyboard
@@ -111,13 +112,14 @@ from aiogram.types import ChatMemberUpdated, ChatType
 # Установка команд с подсказками
 async def set_bot_commands(bot: Bot):
     commands = [
-        BotCommand(command="/start", description="Старт"),
         BotCommand(command="/newtask", description="Создать задачу"),
         BotCommand(command="/setstatus", description="Изменить статус"),
         BotCommand(command="/setdeadline", description="Изменить срок"),
         BotCommand(command="/listtasks", description="Список задач"),
         BotCommand(command="/export", description="Экспорт в CSV"),
-        BotCommand(command="/deletetask", description="Удалить задачу"),
+        BotCommand(command=""),
+        BotCommand(command="/export2", description="Полный экспорт (админ)"),
+        BotCommand(command="/deletetask", description="Удалить задачу (админ)")
     ]
     await bot.set_my_commands(commands)
 
@@ -284,9 +286,8 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
         conn.commit()
 
         response = (
-            f"✅ Задача создана!\n\n"
             f"📌 <b>{task_text}</b>\n"
-            f"👤 {executor}\n"
+            f"👤 {executor} "
         )
         if deadline:
             response += f"⏳ {deadline}"
@@ -324,7 +325,7 @@ async def status_select_task(message: types.Message):
         cursor.execute("""
             SELECT id, task_text, status 
             FROM tasks
-            WHERE chat_id=?
+            WHERE chat_id=? AND status<>'удалено'
             ORDER BY id DESC 
             LIMIT 5
         """, (message.from_user.id,))
@@ -385,7 +386,7 @@ async def process_manual_task_id_status(message: types.Message, state: FSMContex
 async def show_status_options(message_obj, task_id):
     """Показать варианты статусов"""
     keyboard = InlineKeyboardMarkup(row_width=2)
-    statuses = ["новая", "в работе", "ожидает доклада", "исполнено"]
+    statuses = ["новая", "в работе", "ожидает доклада", "исполнено", "удалено"]
     buttons = [InlineKeyboardButton(
         status, 
         callback_data=f"set_status_{task_id}_{status}"
@@ -431,7 +432,7 @@ async def deadline_select_task(message: types.Message):
         cursor.execute("""
             SELECT id, task_text, deadline 
             FROM tasks
-            WHERE chat_id=?
+            WHERE chat_id=? AND status<>'удалено'
             ORDER BY id DESC 
             LIMIT 5
         """, (message.from_user.id,))
@@ -566,7 +567,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
     try:
         cursor = conn.cursor()
         # Получаем общее количество задач
-        cursor.execute("SELECT COUNT(*) FROM tasks WHERE chat_id=?",(message.from_user.id,))
+        cursor.execute("SELECT COUNT(*) FROM tasks WHERE chat_id=? AND status<>'удалено'",(message.from_user.id,))
         total_tasks = cursor.fetchone()[0]
         
         if total_tasks == 0:
@@ -585,7 +586,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
         cursor.execute("""
             SELECT id, user_id, task_text, status, deadline 
             FROM tasks 
-            WHERE chat_id=?
+            WHERE chat_id=? AND status<>'удалено'
             ORDER BY id DESC 
             LIMIT 5 OFFSET ?
         """, (message.from_user.id, page * 5))
@@ -691,7 +692,9 @@ async def export_tasks_to_csv(message: types.Message):
                               task_text as "Задача", 
                               status as "Статус", 
                               deadline as "Срок"
-                        FROM tasks ORDER BY id DESC""")
+                        FROM tasks
+                        WHERE status<>'удалено'
+                        ORDER BY id DESC""")
         tasks = cursor.fetchall()
         
         if not tasks:
@@ -745,10 +748,76 @@ async def export_tasks_to_csv(message: types.Message):
         await message.reply(f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
+# ЭКСПОРТ ЗАДАЧ В CSV (с удаленными)
+# ======================
+
+@dp.message_handler(commands=["export2"])
+async def export_tasks_to_csv(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.reply("⛔ Только администратор может делать полный экспорт")
+        return
+      
+    """Экспорт всех задач в CSV файл с кодировкой win1251"""
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tasks ORDER BY id DESC")
+        tasks = cursor.fetchall()
+        
+        if not tasks:
+            await message.reply("📭 В базе нет задач для экспорта.")
+            return
+
+        # Создаем CSV в памяти
+        output = io.BytesIO()
+        
+        # Используем TextIOWrapper с нужной кодировкой
+        text_buffer = io.TextIOWrapper(
+            output,
+            encoding='utf-8-sig',
+            errors='replace',  # заменяем некодируемые символы
+            newline=''
+        )
+        
+        writer = csv.writer(
+            text_buffer,
+            delimiter=';',  # Указываем нужный разделитель
+            quoting=csv.QUOTE_MINIMAL
+        )
+        
+        # Заголовки столбцов
+        headers = ['ID', 'Исполнитель', 'ID создателя', 'Задача', 'Статус', 'Срок']
+        writer.writerow(headers)
+        
+        # Данные
+        for task in tasks:
+            # Преобразуем все значения в строки
+            row = [
+                str(item) if item is not None else ''
+                for item in task
+            ]
+            writer.writerow(row)
+        
+        # Важно: закрыть TextIOWrapper перед использованием буфера
+        text_buffer.flush()
+        text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
+        output.seek(0)
+        
+        # Создаем временный файл
+        csv_file = InputFile(output, filename="tasks_export.csv")
+        
+        await message.reply_document(
+            document=csv_file
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
+        await message.reply(f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+
+# ======================
 # УДАЛЕНИЕ ЗАДАЧ
 # ======================
 
-@dp.message_handler(lambda message: message.text == "🗑 Удалить задачу")
+@dp.message_handler(commands=["deletetask"])
 async def delete_task_start(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         await message.reply("⛔ Только администратор может удалять задачи")
