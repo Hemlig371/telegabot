@@ -277,8 +277,8 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
 # ======================
 
 class StatusUpdate(StatesGroup):
-    waiting_for_task_selection = State()  # Для выбора задачи
-    waiting_for_status_choice = State()   # Для выбора статуса
+    waiting_for_task_selection = State()
+    waiting_for_status_choice = State()
 
 @dp.message_handler(lambda message: message.text == "🔄 Изменить статус")
 async def status_select_task(message: types.Message):
@@ -315,10 +315,10 @@ async def status_select_task(message: types.Message):
 @dp.callback_query_handler(lambda c: c.data.startswith("status_task_"), state=StatusUpdate.waiting_for_task_selection)
 async def process_selected_task_status(callback_query: types.CallbackQuery, state: FSMContext):
     """Обработка выбранной задачи для изменения статуса"""
-    task_id = callback_query.data.split("_")[2]
+    task_id = callback_query.data.split("_")[2]  # Формат: status_task_123
     await state.update_data(task_id=task_id)
-    await show_status_options(callback_query.message)
-    await show_status_options(callback_query.message, task_id)
+    await show_status_options(callback_query.message, task_id)  # Передаем task_id
+    await StatusUpdate.waiting_for_status_choice.set()
 
 @dp.callback_query_handler(lambda c: c.data == "status_manual_id", state=StatusUpdate.waiting_for_task_selection)
 async def ask_for_manual_id_status(callback_query: types.CallbackQuery):
@@ -335,18 +335,24 @@ async def process_manual_task_id_status(message: types.Message, state: FSMContex
         cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
         if not cursor.fetchone():
             await message.reply("⚠ Задача не найдена!")
+            await state.finish()
             return
         
         await state.update_data(task_id=task_id)
-        await show_status_options(message)
+        await show_status_options(message, task_id)  # Передаем task_id
         await StatusUpdate.waiting_for_status_choice.set()
     except ValueError:
         await message.reply("⚠ Введите числовой ID задачи!")
+        await state.finish()
 
 async def show_status_options(message_obj, task_id):
+    """Показать варианты статусов"""
     keyboard = InlineKeyboardMarkup(row_width=2)
     statuses = ["новая", "в работе", "ожидает доклада", "исполнено"]
-    buttons = [InlineKeyboardButton(status, callback_data=f"set_status_{task_id}_{status}") for status in statuses]
+    buttons = [InlineKeyboardButton(
+        status, 
+        callback_data=f"set_status_{task_id}_{status}"
+    ) for status in statuses]
     keyboard.add(*buttons)
     await message_obj.reply("📌 Выберите новый статус:", reply_markup=keyboard)
 
@@ -354,9 +360,8 @@ async def show_status_options(message_obj, task_id):
 async def process_status_update(callback_query: types.CallbackQuery, state: FSMContext):
     """Обработка изменения статуса"""
     try:
-        new_status = callback_query.data.split("_")[3]
-        user_data = await state.get_data()
-        task_id = user_data['task_id']
+        # Извлекаем task_id и новый статус из callback_data
+        _, _, task_id, new_status = callback_query.data.split("_")
         
         cursor = conn.cursor()
         cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status, task_id))
