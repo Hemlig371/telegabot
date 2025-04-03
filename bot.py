@@ -189,10 +189,6 @@ async def process_executor(message: types.Message, state: FSMContext):
     """Обработка исполнителя задачи"""
     executor = message.text.strip()
 
-    if not re.match(r"^@\w+$", executor):
-        await message.reply("⚠ Ошибка! Введите исполнителя в формате @username\nПример: @example_user")
-        return
-
     await state.update_data(executor=executor)
     await message.reply(
         "⏳ Выберите срок или введите свой (можно без срока):",
