@@ -30,7 +30,7 @@ API_TOKEN = os.getenv('apibotkey')
 DB_PATH = "/bd1/tasks.db"
 
 # Список разрешенных пользователей
-ALLOWED_USERS = [719910511]  
+ALLOWED_USERS = [719910511, 997412998, 1097397831, 771104718, 375577548]  
 
 # ID администратора (может удалять задачи)
 ADMIN_ID = 719910511  
@@ -101,6 +101,31 @@ def get_status_keyboard(task_id):
     buttons = [InlineKeyboardButton(status, callback_data=f"set_status_{task_id}_{status}") for status in statuses]
     keyboard.add(*buttons)
     return keyboard
+
+from aiogram.types import ChatMemberUpdated, ChatType
+
+# ======================
+# ДОБАВЛЕНИЕ В ГРУППУ
+# ======================
+
+@dp.chat_member_handler()
+async def chat_member_update(update: ChatMemberUpdated):
+    # Проверяем, что это добавление бота в группу
+    if update.new_chat_member.user.id == bot.id and update.new_chat_member.status == "member":
+        # Получаем список администраторов чата
+        admins = await bot.get_chat_administrators(update.chat.id)
+        
+        # Проверяем, кто добавил бота
+        added_by = update.from_user.id
+        is_admin = (added_by == ADMIN_ID)
+        
+        if not is_admin:
+            await bot.send_message(
+                update.chat.id,
+                "⛔ Только администраторы могут добавлять этого бота в чат!\n"
+                "Бот будет удален из чата."
+            )
+            await bot.leave_chat(update.chat.id)
 
 # ======================
 # ОБРАБОТЧИКИ КОМАНД
