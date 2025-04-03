@@ -782,7 +782,7 @@ async def export_tasks_to_csv(message: types.Message):
         )
         
         # Заголовки столбцов
-        headers = ['ID', 'Исполнитель', 'ID создателя', 'Задача', 'Статус', 'Срок']
+        headers = ['ID', 'ID создателя', 'Исполнитель', 'Задача', 'Статус', 'Срок']
         writer.writerow(headers)
         
         # Данные
