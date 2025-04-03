@@ -566,7 +566,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
     try:
         cursor = conn.cursor()
         # Получаем общее количество задач
-        cursor.execute("SELECT COUNT(*) FROM tasks WHERE chat_id=?", (message.from_user.id)
+        cursor.execute("SELECT COUNT(*) FROM tasks WHERE chat_id=?",(message.from_user.id,))
         total_tasks = cursor.fetchone()[0]
         
         if total_tasks == 0:
