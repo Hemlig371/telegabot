@@ -133,26 +133,44 @@ async def start_command(message: types.Message):
 # Команды вызывают те же функции, что и кнопки
 @dp.message_handler(commands=["newtask"])
 async def cmd_new_task(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return  
     await new_task_start(message)  # Тот же обработчик, что и для кнопки "➕ Новая задача"
 
 @dp.message_handler(commands=["setstatus"])
 async def cmd_set_status(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return  
     await status_select_task(message)  # Аналогично кнопке "🔄 Изменить статус"
 
 @dp.message_handler(commands=["setdeadline"])
 async def cmd_set_deadline(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return  
     await deadline_select_task(message)  # Аналогично кнопке "⏳ Изменить срок"
 
 @dp.message_handler(commands=["listtasks"])
 async def cmd_list_tasks(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return  
     await list_tasks(message)  # Аналогично кнопке "📋 Список задач"
 
 @dp.message_handler(commands=["export"])
 async def cmd_export_tasks(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return  
     await export_tasks_to_csv(message)  # Аналогично кнопке "📤 Экспорт задач"
 
 @dp.message_handler(commands=["deletetask"])
 async def cmd_delete_task(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return  
     await delete_task_start(message)  # Аналогично кнопке "🗑 Удалить задачу"
 
 # ======================
@@ -183,6 +201,9 @@ async def start_command(message: types.Message):
 
 @dp.message_handler(lambda message: message.text == "➕ Новая задача")
 async def new_task_start(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return  
     """Начало создания задачи через кнопку меню"""
     await message.reply("📌 Введите название задачи:")
     await TaskCreation.waiting_for_title.set()
@@ -292,6 +313,9 @@ class StatusUpdate(StatesGroup):
 
 @dp.message_handler(lambda message: message.text == "🔄 Изменить статус")
 async def status_select_task(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return  
     """Показ списка задач для изменения статуса"""
     try:
         cursor = conn.cursor()
@@ -395,6 +419,9 @@ class TaskUpdate(StatesGroup):
 
 @dp.message_handler(lambda message: message.text == "⏳ Изменить срок")
 async def deadline_select_task(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return  
     """Показ списка задач для изменения срока"""
     try:
         cursor = conn.cursor()
@@ -513,6 +540,9 @@ current_page = {}
 
 @dp.message_handler(lambda message: message.text == "📋 Список задач")
 async def list_tasks(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return  
     """Просмотр списка задач с пагинацией"""
     try:
         user_id = message.from_user.id
@@ -645,6 +675,9 @@ async def process_tasks_pagination(callback_query: types.CallbackQuery):
 
 @dp.message_handler(lambda message: message.text == "📤 Экспорт задач")
 async def export_tasks_to_csv(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return  
     """Экспорт всех задач в CSV файл с кодировкой win1251"""
     try:
         cursor = conn.cursor()
