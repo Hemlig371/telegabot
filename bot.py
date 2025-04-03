@@ -65,15 +65,13 @@ conn = init_db()
 # ======================
 
 # Главное меню
-menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 menu_keyboard.add(
     KeyboardButton("➕ Новая задача"),
     KeyboardButton("🔄 Изменить статус"),
     KeyboardButton("⏳ Изменить срок"),
     KeyboardButton("📋 Список задач"),
-    KeyboardButton("📤 Экспорт задач"),
-    KeyboardButton("🗑 Удалить задачу"),
-    KeyboardButton("📤 Экспорт задач (с удаленными)")
+    KeyboardButton("📤 Экспорт задач")
 )
 
 # Клавиатура выбора даты
@@ -117,7 +115,6 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="/setdeadline", description="Изменить срок"),
         BotCommand(command="/listtasks", description="Список задач"),
         BotCommand(command="/export", description="Экспорт в CSV"),
-        BotCommand(command=" ", description=" "),
         BotCommand(command="/export2", description="Полный экспорт (админ)"),
         BotCommand(command="/deletetask", description="Удалить задачу (админ)")
     ]
