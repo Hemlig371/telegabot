@@ -271,7 +271,7 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
     try:
         # Получаем chat_id в зависимости от типа message_obj
         if isinstance(message_obj, types.CallbackQuery):
-            chat_id = message_obj.message.chat.id
+            chat_id = message_obj.from_user.id
         else:  # Это обычное сообщение (types.Message)
             chat_id = message_obj.chat.id
 
