@@ -33,7 +33,7 @@ DB_PATH = "/bd1/tasks.db"
 ALLOWED_USERS = [-4716499500, 837149325, 719910511]  
 
 # ID администратора (может удалять задачи)
-ADMIN_ID = -4716499500  
+ADMIN_ID = 719910511  
 
 # Инициализация бота и диспетчера
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
