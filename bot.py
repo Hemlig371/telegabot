@@ -30,7 +30,7 @@ API_TOKEN = os.getenv('apibotkey')
 DB_PATH = "/bd1/tasks.db"
 
 # Список разрешенных пользователей
-ALLOWED_USERS = [-4716499500, 837149325, 719910511]  
+ALLOWED_USERS = [719910511]  
 
 # ID администратора (может удалять задачи)
 ADMIN_ID = 719910511  
