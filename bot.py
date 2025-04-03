@@ -105,29 +105,6 @@ def get_status_keyboard(task_id):
 from aiogram.types import ChatMemberUpdated, ChatType
 
 # ======================
-# ДОБАВЛЕНИЕ В ГРУППУ
-# ======================
-
-@dp.chat_member_handler()
-async def chat_member_update(update: ChatMemberUpdated):
-    # Проверяем, что это добавление бота в группу
-    if update.new_chat_member.user.id == bot.id and update.new_chat_member.status == "member":
-        # Получаем список администраторов чата
-        admins = await bot.get_chat_administrators(update.chat.id)
-        
-        # Проверяем, кто добавил бота
-        added_by = update.from_user.id
-        is_admin = (added_by == ADMIN_ID)
-        
-        if not is_admin:
-            await bot.send_message(
-                update.chat.id,
-                "⛔ Только администраторы могут добавлять этого бота в чат!\n"
-                "Бот будет удален из чата."
-            )
-            await bot.leave_chat(update.chat.id)
-
-# ======================
 # ОБРАБОТЧИКИ КОМАНД
 # ======================
 
@@ -347,9 +324,10 @@ async def status_select_task(message: types.Message):
         cursor.execute("""
             SELECT id, task_text, status 
             FROM tasks
+            WHERE user_id=?
             ORDER BY id DESC 
             LIMIT 5
-        """)
+        """, (message.from_user.id,))
         tasks = cursor.fetchall()
 
         if not tasks:
@@ -453,9 +431,10 @@ async def deadline_select_task(message: types.Message):
         cursor.execute("""
             SELECT id, task_text, deadline 
             FROM tasks
+            WHERE user_id=?
             ORDER BY id DESC 
             LIMIT 5
-        """)
+        """, (message.from_user.id,))
         tasks = cursor.fetchall()
 
         if not tasks:
@@ -606,9 +585,10 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
         cursor.execute("""
             SELECT id, user_id, task_text, status, deadline 
             FROM tasks 
+            WHERE user_id=?
             ORDER BY id DESC 
             LIMIT 5 OFFSET ?
-        """, (page * 5,))
+        """, (message.from_user.id, page * 5))
         tasks = cursor.fetchall()
 
         # Формируем сообщение
@@ -706,7 +686,12 @@ async def export_tasks_to_csv(message: types.Message):
     """Экспорт всех задач в CSV файл с кодировкой win1251"""
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM tasks ORDER BY id DESC")
+        cursor.execute(""" SELECT id, 
+                              chat_id as "Исполнитель", 
+                              task_text as "Задача", 
+                              status as "Статус", 
+                              deadline as "Срок"
+                        FROM tasks ORDER BY id DESC""")
         tasks = cursor.fetchall()
         
         if not tasks:
@@ -731,7 +716,7 @@ async def export_tasks_to_csv(message: types.Message):
         )
         
         # Заголовки столбцов
-        headers = ['ID', 'User ID', 'Chat ID', 'Task Text', 'Status', 'Deadline']
+        headers = ['ID', 'Исполнитель', 'Задача', 'Статус', 'Срок']
         writer.writerow(headers)
         
         # Данные
@@ -752,8 +737,7 @@ async def export_tasks_to_csv(message: types.Message):
         csv_file = InputFile(output, filename="tasks_export.csv")
         
         await message.reply_document(
-            document=csv_file,
-            caption="📊 Экспорт всех задач в CSV"
+            document=csv_file
         )
         
     except Exception as e:
