@@ -29,6 +29,12 @@ logger = logging.getLogger(__name__)
 API_TOKEN = os.getenv('apibotkey')
 DB_PATH = "/bd1/tasks.db"
 
+# Список разрешенных пользователей
+ALLOWED_USERS = [-4716499500, 837149325, 719910511]  
+
+# ID администратора (может удалять задачи)
+ADMIN_ID = -4716499500  
+
 # Инициализация бота и диспетчера
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot, storage=MemoryStorage())
@@ -115,8 +121,12 @@ async def set_bot_commands(bot: Bot):
 
 @dp.message_handler(commands=["start"])
 async def start_command(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return
+    
     await message.reply(
-        "👋 Используйте команды или кнопки:",
+        "👋 Привет! Я бот для управления задачами. Выберите команду:",
         reply_markup=menu_keyboard
     )
 
@@ -698,34 +708,38 @@ async def export_tasks_to_csv(message: types.Message):
 
 @dp.message_handler(lambda message: message.text == "🗑 Удалить задачу")
 async def delete_task_start(message: types.Message):
-    """Начало процесса удаления задачи - показывает 5 последних задач"""
+    if message.from_user.id != ADMIN_ID:
+        await message.reply("⛔ Только администратор может удалять задачи")
+        return
+
     try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, task_text, status 
-            FROM tasks
-            ORDER BY id DESC 
-            LIMIT 5
-        """)
-        tasks = cursor.fetchall()
-
-        if not tasks:
-            await message.reply("📭 У вас нет задач для удаления.")
-            return
-
-        keyboard = InlineKeyboardMarkup(row_width=1)
-        for task_id, task_text, status in tasks:
-            keyboard.add(InlineKeyboardButton(
-                f"{task_text[:30]}... (ID: {task_id}, статус: {status})", 
-                callback_data=f"delete_task_{task_id}"
-            ))
-        
-        keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="enter_task_id_manually_delete"))
-
-        await message.reply("Выберите задачу для удаления или введите ID вручную:", reply_markup=keyboard)
-    except Exception as e:
-        logger.error(f"Ошибка при выборе задачи для удаления: {e}")
-        await message.reply("⚠ Ошибка при получении списка задач.")
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, task_text, status 
+                FROM tasks
+                ORDER BY id DESC 
+                LIMIT 5
+            """)
+            tasks = cursor.fetchall()
+    
+            if not tasks:
+                await message.reply("📭 У вас нет задач для удаления.")
+                return
+    
+            keyboard = InlineKeyboardMarkup(row_width=1)
+            for task_id, task_text, status in tasks:
+                keyboard.add(InlineKeyboardButton(
+                    f"{task_text[:30]}... (ID: {task_id}, статус: {status})", 
+                    callback_data=f"delete_task_{task_id}"
+                ))
+            
+            keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="enter_task_id_manually_delete"))
+    
+            await message.reply("Выберите задачу для удаления или введите ID вручную:", reply_markup=keyboard)
+        except Exception as e:
+            logger.error(f"Ошибка при выборе задачи для удаления: {e}")
+            await message.reply("⚠ Ошибка при получении списка задач.")
 
 @dp.callback_query_handler(lambda c: c.data == "enter_task_id_manually_delete")
 async def ask_for_manual_task_id_delete(callback_query: types.CallbackQuery):
@@ -823,6 +837,14 @@ async def cancel_task_deletion(callback_query: types.CallbackQuery):
     """Отмена удаления задачи"""
     await bot.answer_callback_query(callback_query.id)
     await callback_query.message.edit_text("❌ Удаление отменено.")
+
+# ======================
+# ID Пользователя
+# ======================
+
+@dp.message_handler(commands=["myid"])
+async def get_user_id(message: types.Message):
+    await message.reply(f"🆔 Ваш ID: `{message.from_user.id}`", parse_mode="Markdown")
 
 # ======================
 # ФОНОВЫЕ ЗАДАЧИ
