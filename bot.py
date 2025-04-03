@@ -713,33 +713,32 @@ async def delete_task_start(message: types.Message):
         return
 
     try:
-        try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, task_text, status 
-                FROM tasks
-                ORDER BY id DESC 
-                LIMIT 5
-            """)
-            tasks = cursor.fetchall()
-    
-            if not tasks:
-                await message.reply("📭 У вас нет задач для удаления.")
-                return
-    
-            keyboard = InlineKeyboardMarkup(row_width=1)
-            for task_id, task_text, status in tasks:
-                keyboard.add(InlineKeyboardButton(
-                    f"{task_text[:30]}... (ID: {task_id}, статус: {status})", 
-                    callback_data=f"delete_task_{task_id}"
-                ))
-            
-            keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="enter_task_id_manually_delete"))
-    
-            await message.reply("Выберите задачу для удаления или введите ID вручную:", reply_markup=keyboard)
-        except Exception as e:
-            logger.error(f"Ошибка при выборе задачи для удаления: {e}")
-            await message.reply("⚠ Ошибка при получении списка задач.")
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, task_text, status 
+            FROM tasks
+            ORDER BY id DESC 
+            LIMIT 5
+        """)
+        tasks = cursor.fetchall()
+
+        if not tasks:
+            await message.reply("📭 У вас нет задач для удаления.")
+            return
+
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        for task_id, task_text, status in tasks:
+            keyboard.add(InlineKeyboardButton(
+                f"{task_text[:30]}... (ID: {task_id}, статус: {status})", 
+                callback_data=f"delete_task_{task_id}"
+            ))
+        
+        keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="enter_task_id_manually_delete"))
+
+        await message.reply("Выберите задачу для удаления или введите ID вручную:", reply_markup=keyboard)
+    except Exception as e:
+        logger.error(f"Ошибка при выборе задачи для удаления: {e}")
+        await message.reply("⚠ Ошибка при получении списка задач.")
 
 @dp.callback_query_handler(lambda c: c.data == "enter_task_id_manually_delete")
 async def ask_for_manual_task_id_delete(callback_query: types.CallbackQuery):
