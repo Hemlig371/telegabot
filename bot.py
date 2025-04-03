@@ -117,7 +117,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="/setdeadline", description="Изменить срок"),
         BotCommand(command="/listtasks", description="Список задач"),
         BotCommand(command="/export", description="Экспорт в CSV"),
-        BotCommand(command=""),
+        BotCommand(command=" ", description=" "),
         BotCommand(command="/export2", description="Полный экспорт (админ)"),
         BotCommand(command="/deletetask", description="Удалить задачу (админ)")
     ]
