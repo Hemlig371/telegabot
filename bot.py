@@ -131,7 +131,7 @@ async def set_bot_commands(bot: Bot):
 @dp.message_handler(commands=["start"])
 async def start_command(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
     
     await bot.send_message(chat_id=message.from_user.id,
@@ -143,56 +143,56 @@ async def start_command(message: types.Message):
 @dp.message_handler(commands=["newtask"])
 async def cmd_new_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     await new_task_start(message)  # Тот же обработчик, что и для кнопки "➕ Новая задача"
 
 @dp.message_handler(commands=["quicktask"])
 async def cmd_new_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     await quick_task_start(message)  # Тот же обработчик, что и для кнопки "⚡ Быстрая задача"
 
 @dp.message_handler(commands=["setstatus"])
 async def cmd_set_status(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     await status_select_task(message)  # Аналогично кнопке "🔄 Изменить статус"
 
 @dp.message_handler(commands=["setexecutor"])
 async def cmd_set_executor(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     await executor_select_task(message)  # Аналогично кнопке "👤 Изменить исполнителя"
 
 @dp.message_handler(commands=["setdeadline"])
 async def cmd_set_deadline(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     await deadline_select_task(message)  # Аналогично кнопке "⏳ Изменить срок"
 
 @dp.message_handler(commands=["listtasks"])
 async def cmd_list_tasks(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     await list_tasks(message)  # Аналогично кнопке "📋 Список задач"
 
 @dp.message_handler(commands=["export"])
 async def cmd_export_tasks(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     await export_tasks_to_csv(message)  # Аналогично кнопке "📤 Экспорт задач"
 
 @dp.message_handler(commands=["deletetask"])
 async def cmd_delete_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     await delete_task_start(message)  # Аналогично кнопке "🗑 Удалить задачу"
 
@@ -216,7 +216,7 @@ class TaskDeletion(StatesGroup):
 
 @dp.message_handler(commands=["start"])
 async def start_command(message: types.Message):
-    await bot.send_message(chat_id=message.from_user.id,"👋 Привет! Я бот для управления задачами. Используйте кнопки ниже:")
+    await bot.send_message(chat_id=message.from_user.id, text="👋 Привет! Я бот для управления задачами. Используйте кнопки ниже:")
 
 # ======================
 # СОЗДАНИЕ ЗАДАЧ
@@ -225,17 +225,17 @@ async def start_command(message: types.Message):
 @dp.message_handler(lambda message: message.text == "➕ Новая задача")
 async def new_task_start(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     """Начало создания задачи через кнопку меню"""
-    await bot.send_message(chat_id=message.from_user.id,"📌 Введите название задачи:")
+    await bot.send_message(chat_id=message.from_user.id, text="📌 Введите название задачи:")
     await TaskCreation.waiting_for_title.set()
 
 @dp.message_handler(state=TaskCreation.waiting_for_title)
 async def process_title(message: types.Message, state: FSMContext):
     """Обработка названия задачи"""
     await state.update_data(title = message.text if message.text else message.caption if message.caption else message.forward_from_message.caption if message.forward_from_message else None)
-    await bot.send_message(chat_id=message.from_user.id,"👤 Исполнитель (@username):")
+    await bot.send_message(chat_id=message.from_user.id, text="👤 Исполнитель (@username):")
     await TaskCreation.waiting_for_executor.set()
 
 @dp.message_handler(state=TaskCreation.waiting_for_executor)
@@ -282,7 +282,7 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
             await save_task(message, state, message.text.strip())
             
     except ValueError:
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Ошибка! Введите дату в формате YYYY-MM-DD.")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка! Введите дату в формате YYYY-MM-DD.")
 
 async def save_task(message_obj, state: FSMContext, deadline: str):
     """Сохранение задачи в БД"""
@@ -428,10 +428,10 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         await bot.send_message(chat_id=message.from_user.id,f"⚠ Ошибка: {str(e)}")
     except sqlite3.Error as e:
         logger.error(f"Ошибка БД: {e}")
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Ошибка при сохранении задачи")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при сохранении задачи")
     except Exception as e:
         logger.error(f"Ошибка: {str(e)}")
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Неверный формат данных")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Неверный формат данных")
     finally:
         await state.finish()
 
@@ -446,7 +446,7 @@ class StatusUpdate(StatesGroup):
 @dp.message_handler(lambda message: message.text == "🔄 Изменить статус")
 async def status_select_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     """Показ списка задач для изменения статуса"""
     try:
@@ -469,11 +469,11 @@ async def status_select_task(message: types.Message):
         
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="status_manual_id"))
 
-        await bot.send_message(chat_id=message.from_user.id,"Выберите задачу для изменения статуса:", reply_markup=keyboard)
+        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для изменения статуса:", reply_markup=keyboard)
         await StatusUpdate.waiting_for_task_selection.set()
     except Exception as e:
         logger.error(f"Ошибка при получении списка задач: {e}")
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Ошибка при получении списка задач")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при получении списка задач")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("status_task_"), state=StatusUpdate.waiting_for_task_selection)
 async def process_selected_task_status(callback_query: types.CallbackQuery, state: FSMContext):
@@ -497,7 +497,7 @@ async def process_manual_task_id_status(message: types.Message, state: FSMContex
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
         if not cursor.fetchone():
-            await bot.send_message(chat_id=message.from_user.id,"⚠ Задача не найдена!")
+            await bot.send_message(chat_id=message.from_user.id, text="⚠ Задача не найдена!")
             await state.finish()
             return
         
@@ -505,7 +505,7 @@ async def process_manual_task_id_status(message: types.Message, state: FSMContex
         await show_status_options(message, task_id)  # Передаем task_id
         await StatusUpdate.waiting_for_status_choice.set()
     except ValueError:
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Введите числовой ID задачи!")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Введите числовой ID задачи!")
         await state.finish()
 
 async def show_status_options(message_obj, task_id):
@@ -548,7 +548,7 @@ class ExecutorUpdate(StatesGroup):
 @dp.message_handler(lambda message: message.text == "👤 Изменить исполнителя")
 async def executor_select_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
     
     try:
@@ -571,12 +571,12 @@ async def executor_select_task(message: types.Message):
         
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="executor_manual_id"))
 
-        await bot.send_message(chat_id=message.from_user.id,"Выберите задачу для изменения исполнителя:", reply_markup=keyboard)
+        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для изменения исполнителя:", reply_markup=keyboard)
         await ExecutorUpdate.waiting_for_task_selection.set()
         
     except Exception as e:
         logger.error(f"Ошибка при получении списка задач: {e}")
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Ошибка при получении списка задач")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при получении списка задач")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("executor_task_"), state=ExecutorUpdate.waiting_for_task_selection)
 async def process_selected_task_executor(callback_query: types.CallbackQuery, state: FSMContext):
@@ -597,15 +597,15 @@ async def process_manual_task_id_executor(message: types.Message, state: FSMCont
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
         if not cursor.fetchone():
-            await bot.send_message(chat_id=message.from_user.id,"⚠ Задача не найдена!")
+            await bot.send_message(chat_id=message.from_user.id, text="⚠ Задача не найдена!")
             await state.finish()
             return
         
         await state.update_data(task_id=task_id)
-        await bot.send_message(chat_id=message.from_user.id,"✏️ Введите нового исполнителя (@username или user_id):")
+        await bot.send_message(chat_id=message.from_user.id, text="✏️ Введите нового исполнителя (@username или user_id):")
         await ExecutorUpdate.waiting_for_new_executor.set()
     except ValueError:
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Введите числовой ID задачи!")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Введите числовой ID задачи!")
         await state.finish()
 
 @dp.message_handler(state=ExecutorUpdate.waiting_for_new_executor)
@@ -624,7 +624,7 @@ async def process_new_executor(message: types.Message, state: FSMContext):
         
     except Exception as e:
         logger.error(f"Ошибка при изменении исполнителя: {e}")
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Ошибка при изменении исполнителя")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при изменении исполнителя")
         await state.finish()
 
 # ======================
@@ -639,7 +639,7 @@ class TaskUpdate(StatesGroup):
 @dp.message_handler(lambda message: message.text == "⏳ Изменить срок")
 async def deadline_select_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     """Показ списка задач для изменения срока"""
     try:
@@ -662,11 +662,11 @@ async def deadline_select_task(message: types.Message):
         
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="deadline_manual_id"))
 
-        await bot.send_message(chat_id=message.from_user.id,"Выберите задачу для изменения срока:", reply_markup=keyboard)
+        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для изменения срока:", reply_markup=keyboard)
         await TaskUpdate.waiting_for_task_selection.set()
     except Exception as e:
         logger.error(f"Ошибка при получении списка задач: {e}")
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Ошибка при получении списка задач")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при получении списка задач")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("deadline_task_"), state=TaskUpdate.waiting_for_task_selection)
 async def process_selected_task(callback_query: types.CallbackQuery, state: FSMContext):
@@ -690,14 +690,14 @@ async def process_manual_task_id(message: types.Message, state: FSMContext):
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
         if not cursor.fetchone():
-            await bot.send_message(chat_id=message.from_user.id,"⚠ Задача не найдена!")
+            await bot.send_message(chat_id=message.from_user.id, text="⚠ Задача не найдена!")
             return
         
         await state.update_data(task_id=task_id)
         await show_deadline_options(message)
         await TaskUpdate.waiting_for_deadline_choice.set()
     except ValueError:
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Введите числовой ID задачи!")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Введите числовой ID задачи!")
 
 async def show_deadline_options(message_obj):
     """Показать варианты выбора срока"""
@@ -746,7 +746,7 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
         await bot.send_message(chat_id=message.from_user.id,f"✅ Новый срок установлен: {new_deadline}")
         await state.finish()
     except ValueError:
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Неверный формат даты! Используйте YYYY-MM-DD")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Неверный формат даты! Используйте YYYY-MM-DD")
 
 # ======================
 # СПИСОК ЗАДАЧ
@@ -757,7 +757,7 @@ current_page = {}
 @dp.message_handler(lambda message: message.text == "📋 Список задач")
 async def list_tasks(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     """Просмотр списка задач с пагинацией"""
     try:
@@ -771,7 +771,7 @@ async def list_tasks(message: types.Message):
         current_page[f"{user_id}_message_id"] = sent_message.message_id
     except Exception as e:
         logger.error(f"Ошибка при получении списка задач: {str(e)}")
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Ошибка при получении списка задач.")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при получении списка задач.")
 
 async def show_tasks_page(message: types.Message, user_id: int, page: int):
     """Показать страницу с задачами и вернуть отправленное сообщение"""
@@ -893,7 +893,7 @@ async def process_tasks_pagination(callback_query: types.CallbackQuery):
 @dp.message_handler(lambda message: message.text == "📤 Экспорт задач")
 async def export_tasks_to_csv(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Доступ запрещен")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     """Экспорт всех задач в CSV файл с кодировкой win1251"""
     try:
@@ -909,7 +909,7 @@ async def export_tasks_to_csv(message: types.Message):
         tasks = cursor.fetchall()
         
         if not tasks:
-            await bot.send_message(chat_id=message.from_user.id,"📭 В базе нет задач для экспорта.")
+            await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет задач для экспорта.")
             return
 
         # Создаем CSV в памяти
@@ -965,7 +965,7 @@ async def export_tasks_to_csv(message: types.Message):
 @dp.message_handler(commands=["export2"])
 async def export_tasks_to_csv(message: types.Message):
     if message.from_user.id != ADMIN_ID:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Только администратор может делать полный экспорт")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только администратор может делать полный экспорт")
         return
       
     """Экспорт всех задач в CSV файл с кодировкой win1251"""
@@ -975,7 +975,7 @@ async def export_tasks_to_csv(message: types.Message):
         tasks = cursor.fetchall()
         
         if not tasks:
-            await bot.send_message(chat_id=message.from_user.id,"📭 В базе нет задач для экспорта.")
+            await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет задач для экспорта.")
             return
 
         # Создаем CSV в памяти
@@ -1031,7 +1031,7 @@ async def export_tasks_to_csv(message: types.Message):
 @dp.message_handler(commands=["deletetask"])
 async def delete_task_start(message: types.Message):
     if message.from_user.id != ADMIN_ID:
-        await bot.send_message(chat_id=message.from_user.id,"⛔ Только администратор может удалять задачи")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только администратор может удалять задачи")
         return
 
     try:
@@ -1045,7 +1045,7 @@ async def delete_task_start(message: types.Message):
         tasks = cursor.fetchall()
 
         if not tasks:
-            await bot.send_message(chat_id=message.from_user.id,"📭 У вас нет задач для удаления.")
+            await bot.send_message(chat_id=message.from_user.id, text="📭 У вас нет задач для удаления.")
             return
 
         keyboard = InlineKeyboardMarkup(row_width=1)
@@ -1057,10 +1057,10 @@ async def delete_task_start(message: types.Message):
         
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="enter_task_id_manually_delete"))
 
-        await bot.send_message(chat_id=message.from_user.id,"Выберите задачу для удаления или введите ID вручную:", reply_markup=keyboard)
+        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для удаления или введите ID вручную:", reply_markup=keyboard)
     except Exception as e:
         logger.error(f"Ошибка при выборе задачи для удаления: {e}")
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Ошибка при получении списка задач.")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при получении списка задач.")
 
 @dp.callback_query_handler(lambda c: c.data == "enter_task_id_manually_delete")
 async def ask_for_manual_task_id_delete(callback_query: types.CallbackQuery):
@@ -1077,17 +1077,17 @@ async def process_manual_task_id_delete(message: types.Message, state: FSMContex
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
         if not cursor.fetchone():
-            await bot.send_message(chat_id=message.from_user.id,"⚠ Задача с таким ID не найдена или не принадлежит вам!")
+            await bot.send_message(chat_id=message.from_user.id, text="⚠ Задача с таким ID не найдена или не принадлежит вам!")
             await state.finish()
             return
         
         await state.update_data(task_id=task_id)
         await show_delete_confirmation(message, task_id)
     except ValueError:
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Пожалуйста, введите числовой ID задачи!")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Пожалуйста, введите числовой ID задачи!")
     except Exception as e:
         logger.error(f"Ошибка при обработке ручного ввода ID: {e}")
-        await bot.send_message(chat_id=message.from_user.id,"⚠ Произошла ошибка. Попробуйте снова.")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Произошла ошибка. Попробуйте снова.")
         await state.finish()
 
 @dp.callback_query_handler(lambda c: c.data.startswith("delete_task_"))
