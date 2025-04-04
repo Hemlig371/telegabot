@@ -136,7 +136,7 @@ async def start_command(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
     
-    await bot.send_message(chat_id=message.from_user.id, text=
+    await bot.send_message(chat_id=message.chat.id, text=
         "👋 Привет! Я бот для управления задачами. Выберите команду:",
         reply_markup=menu_keyboard
     )
