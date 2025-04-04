@@ -876,7 +876,7 @@ async def process_tasks_pagination(callback_query: types.CallbackQuery):
         current_page[user_id] = page
         
         # Получаем chat_id из callback_query
-        chat_id = callback_query.message.from_user.id
+        chat_id = callback_query.message.chat.id
         
         # Создаем fake message object для передачи в show_tasks_page
         class FakeMessage:
