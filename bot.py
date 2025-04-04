@@ -1144,7 +1144,7 @@ async def check_deadlines():
                     # Отправляем в ЛС создателя (chat_id == user_id)
                     await bot.send_message(
                         chat_id=chat_id,
-                        text=f"⏳ Напоминание о задаче {task_id}:\n{task_text}\n\n{user_id}\n{status} {deadline}"
+                        text=f"⏳ Напоминание о задаче 🔹{task_id}:\n📝: {task_text}\n\n👤: {user_id}\n🔄: {status} ⏳: {deadline}"
                     )
                 except exceptions.BotBlocked:
                     logger.error(f"Пользователь {chat_id} заблокировал бота")
