@@ -1222,7 +1222,7 @@ async def show_delete_confirmation(message_obj, task_id):
     )
     
     # Отправляем новое сообщение с подтверждением
-    await bot.send_message(chat_id=message_obj.from_user.id, text=
+    await bot.send_message(chat_id=message_obj.chat.id, text=
         f"Вы уверены, что хотите удалить задачу?\n\n"
         f"📌 {task_text}\n"
         f"🔄 {status}\n"
@@ -1241,7 +1241,7 @@ async def execute_task_deletion(callback_query: types.CallbackQuery):
         task = cursor.fetchone()
         
         if not task:
-            await bot.send_message(chat_id=callback_query.from_user.id, text="⚠ Задача не найдена!")
+            await bot.send_message(chat_id=callback_query.chat.id, text="⚠ Задача не найдена!")
             return
             
         task_text = task[0]
