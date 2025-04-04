@@ -410,6 +410,100 @@ async def process_status_update(callback_query: types.CallbackQuery, state: FSMC
         await state.finish()
 
 # ======================
+# ИЗМЕНЕНИЕ ИСПОЛНИТЕЛЯ
+# ======================
+
+class ExecutorUpdate(StatesGroup):
+    waiting_for_task_selection = State()
+    waiting_for_new_executor = State()
+
+@dp.message_handler(lambda message: message.text == "👤 Изменить исполнителя")
+async def executor_select_task(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, task_text, user_id 
+            FROM tasks
+            WHERE chat_id=? AND status<>'удалено'
+            ORDER BY id DESC 
+            LIMIT 5
+        """, (message.from_user.id,))
+        tasks = cursor.fetchall()
+
+        if not tasks:
+            await message.reply("📭 У вас нет задач для изменения исполнителя.")
+            return
+
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        for task_id, task_text, current_executor in tasks:
+            keyboard.add(InlineKeyboardButton(
+                f"{task_text[:30]}... (ID: {task_id}, текущий: {current_executor})", 
+                callback_data=f"executor_task_{task_id}"
+            ))
+        
+        keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="executor_manual_id"))
+
+        await message.reply("Выберите задачу для изменения исполнителя:", reply_markup=keyboard)
+        await ExecutorUpdate.waiting_for_task_selection.set()
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка задач: {e}")
+        await message.reply("⚠ Ошибка при получении списка задач")
+
+@dp.callback_query_handler(lambda c: c.data.startswith("executor_task_"), state=ExecutorUpdate.waiting_for_task_selection)
+async def process_selected_task_executor(callback_query: types.CallbackQuery, state: FSMContext):
+    task_id = callback_query.data.split("_")[2]
+    await state.update_data(task_id=task_id)
+    await callback_query.message.reply("✏️ Введите нового исполнителя (@username или user_id):")
+    await ExecutorUpdate.waiting_for_new_executor.set()
+
+@dp.callback_query_handler(lambda c: c.data == "executor_manual_id", state=ExecutorUpdate.waiting_for_task_selection)
+async def ask_for_manual_id_executor(callback_query: types.CallbackQuery):
+    await callback_query.message.reply("✏️ Введите ID задачи:")
+    await ExecutorUpdate.waiting_for_task_selection.set()
+
+@dp.message_handler(state=ExecutorUpdate.waiting_for_task_selection)
+async def process_manual_task_id_executor(message: types.Message, state: FSMContext):
+    try:
+        task_id = int(message.text)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
+        if not cursor.fetchone():
+            await message.reply("⚠ Задача не найдена!")
+            await state.finish()
+            return
+        
+        await state.update_data(task_id=task_id)
+        await message.reply("✏️ Введите нового исполнителя (@username или user_id):")
+        await ExecutorUpdate.waiting_for_new_executor.set()
+    except ValueError:
+        await message.reply("⚠ Введите числовой ID задачи!")
+        await state.finish()
+
+@dp.message_handler(state=ExecutorUpdate.waiting_for_new_executor)
+async def process_new_executor(message: types.Message, state: FSMContext):
+    try:
+        new_executor = message.text.strip()
+        user_data = await state.get_data()
+        task_id = user_data['task_id']
+
+        cursor = conn.cursor()
+        cursor.execute("UPDATE tasks SET user_id=? WHERE id=?", (new_executor, task_id))
+        conn.commit()
+
+        await message.reply(f"✅ Исполнитель задачи {task_id} изменен на '{new_executor}'")
+        await state.finish()
+        
+    except Exception as e:
+        logger.error(f"Ошибка при изменении исполнителя: {e}")
+        await message.reply("⚠ Ошибка при изменении исполнителя")
+        await state.finish()
+
+# ======================
 # ИЗМЕНЕНИЕ СРОКА
 # ======================
 
