@@ -19,6 +19,7 @@ import io
 from aiogram.types import InputFile
 
 from aiogram.utils import exceptions
+from aiogram.dispatcher.middlewares import BaseMiddleware
 
 # Настройка логирования
 logging.basicConfig(
@@ -61,6 +62,21 @@ def init_db():
         raise
 
 conn = init_db()
+
+# Привязка состояния к пользователю
+class UserIDMiddleware(BaseMiddleware):
+    async def on_pre_process_message(self, message: types.Message, data: dict):
+        # Для ЛС используем user_id как chat_id
+        if message.chat.type == "private":
+            data["state"]._chat_id = message.from_user.id
+
+    async def on_pre_process_callback_query(self, callback_query: types.CallbackQuery, data: dict):
+        # Для ЛС используем user_id как chat_id
+        if callback_query.message.chat.type == "private":
+            data["state"]._chat_id = callback_query.from_user.id
+
+# Подключите middleware
+dp.middleware.setup(UserIDMiddleware())
 
 # ======================
 # КЛАВИАТУРЫ И ИНТЕРФЕЙС
@@ -253,7 +269,7 @@ async def process_executor(message: types.Message, state: FSMContext):
     executor = message.text.strip()
 
     await state.update_data(executor=executor)
-    await bot.send_message(chat_id=message.chat.id, text=
+    await bot.send_message(chat_id=message.from_user.id, text=
         "⏳ Выберите срок или введите свой:",
         reply_markup=get_deadline_keyboard(with_none_option=True)
     )
@@ -478,7 +494,7 @@ async def status_select_task(message: types.Message):
         
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="status_manual_id"))
 
-        await bot.send_message(chat_id=message.chat.id, text="Выберите задачу для изменения статуса:", reply_markup=keyboard)
+        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для изменения статуса:", reply_markup=keyboard)
         await StatusUpdate.waiting_for_task_selection.set()
     except Exception as e:
         logger.error(f"Ошибка при получении списка задач: {e}")
@@ -580,7 +596,7 @@ async def executor_select_task(message: types.Message):
         
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="executor_manual_id"))
 
-        await bot.send_message(chat_id=message.chat.id, text="Выберите задачу для изменения исполнителя:", reply_markup=keyboard)
+        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для изменения исполнителя:", reply_markup=keyboard)
         await ExecutorUpdate.waiting_for_task_selection.set()
         
     except Exception as e:
@@ -671,7 +687,7 @@ async def deadline_select_task(message: types.Message):
         
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="deadline_manual_id"))
 
-        await bot.send_message(chat_id=message.chat.id, text="Выберите задачу для изменения срока:", reply_markup=keyboard)
+        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для изменения срока:", reply_markup=keyboard)
         await TaskUpdate.waiting_for_task_selection.set()
     except Exception as e:
         logger.error(f"Ошибка при получении списка задач: {e}")
@@ -791,7 +807,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
         total_tasks = cursor.fetchone()[0]
         
         if total_tasks == 0:
-            return await bot.send_message(message.chat.id, "📭 У вас нет активных задач.")
+            return await bot.send_message(message.from_user.id, "📭 У вас нет активных задач.")
         
         # Вычисляем общее количество страниц
         total_pages = (total_tasks - 1) // 5
@@ -838,7 +854,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
         
         # Всегда отправляем новое сообщение
         sent_message = await bot.send_message(
-            chat_id=message.chat.id,
+            chat_id=message.from_user.id,
             text=f"📋 Список задач (страница {page+1} из {total_pages+1}):\n\n" + "\n".join(result),
             reply_markup=keyboard
         )
@@ -846,7 +862,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
         
     except Exception as e:
         logger.error(f"Ошибка при отображении страницы задач: {str(e)}")
-        await bot.send_message(message.chat.id, "⚠ Ошибка при отображении задач.")
+        await bot.send_message(message.from_user.id, "⚠ Ошибка при отображении задач.")
         return None
 
 @dp.callback_query_handler(lambda c: c.data.startswith(("tasks_prev_", "tasks_next_")))
@@ -861,7 +877,7 @@ async def process_tasks_pagination(callback_query: types.CallbackQuery):
         current_page[user_id] = page
         
         # Получаем chat_id из callback_query
-        chat_id = callback_query.message.chat.id
+        chat_id = callback_query.message.from_user.id
         
         # Создаем fake message object для передачи в show_tasks_page
         class FakeMessage:
@@ -1138,7 +1154,7 @@ async def delete_task_start(message: types.Message):
         
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="enter_task_id_manually_delete"))
 
-        await bot.send_message(chat_id=message.chat.id, text="Выберите задачу для удаления или введите ID вручную:", reply_markup=keyboard)
+        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для удаления или введите ID вручную:", reply_markup=keyboard)
     except Exception as e:
         logger.error(f"Ошибка при выборе задачи для удаления: {e}")
         await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при получении списка задач.")
