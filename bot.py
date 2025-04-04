@@ -75,7 +75,8 @@ menu_keyboard.add(
     KeyboardButton("👤 Изменить исполнителя"),
     KeyboardButton("⏳ Изменить срок"),
     KeyboardButton("📋 Список задач"),
-    KeyboardButton("📤 Экспорт задач")
+    KeyboardButton("📤 Экспорт задач"),
+    KeyboardButton("📤 Экспорт (с исполненными)")
 )
 
 # Клавиатура выбора даты
@@ -121,9 +122,10 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="/setdeadline", description="Изменить срок"),
         BotCommand(command="/listtasks", description="Список задач"),
         BotCommand(command="/export", description="Экспорт в CSV"),
+        BotCommand(command="/export2", description="Экспорт с исполненными"),
         BotCommand(command="/start", description="Старт бота"),
         BotCommand(command="/myid", description="Узнать свой ID"),
-        BotCommand(command="/export2", description="Полный экспорт (админ)"),
+        BotCommand(command="/export3", description="Полный экспорт (админ)"),
         BotCommand(command="/deletetask", description="Удалить задачу (админ)")
     ]
     await bot.set_my_commands(commands)
@@ -188,6 +190,13 @@ async def cmd_export_tasks(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     await export_tasks_to_csv(message)  # Аналогично кнопке "📤 Экспорт задач"
+
+@dp.message_handler(commands=["export2"])
+async def cmd_export_tasks(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+        return  
+    await export_tasks_to_csv2(message)  # Аналогично кнопке "📤 Экспорт (с исполненными)"
 
 @dp.message_handler(commands=["deletetask"])
 async def cmd_delete_task(message: types.Message):
@@ -422,10 +431,10 @@ async def process_quick_task(message: types.Message, state: FSMContext):
             f"📌 <b>{task_text}</b>\n"
             f"👤 {executor if executor else 'не указан'} ⏳ {deadline if deadline else 'не указан'}"
         )
-        await bot.send_message(chat_id=message.from_user.id,response)
+        await bot.send_message(chat_id=message.from_user.id, text=response)
 
     except ValueError as e:
-        await bot.send_message(chat_id=message.from_user.id,f"⚠ Ошибка: {str(e)}")
+        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка: {str(e)}")
     except sqlite3.Error as e:
         logger.error(f"Ошибка БД: {e}")
         await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при сохранении задачи")
@@ -619,7 +628,7 @@ async def process_new_executor(message: types.Message, state: FSMContext):
         cursor.execute("UPDATE tasks SET user_id=? WHERE id=?", (new_executor, task_id))
         conn.commit()
 
-        await bot.send_message(chat_id=message.from_user.id,f"✅ Исполнитель задачи {task_id} изменен на '{new_executor}'")
+        await bot.send_message(chat_id=message.from_user.id,text=f"✅ Исполнитель задачи {task_id} изменен на '{new_executor}'")
         await state.finish()
         
     except Exception as e:
@@ -743,7 +752,7 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
         cursor.execute("UPDATE tasks SET deadline=? WHERE id=?", (new_deadline, task_id))
         conn.commit()
         
-        await bot.send_message(chat_id=message.from_user.id,f"✅ Новый срок установлен: {new_deadline}")
+        await bot.send_message(chat_id=message.from_user.id,text=f"✅ Новый срок установлен: {new_deadline}")
         await state.finish()
     except ValueError:
         await bot.send_message(chat_id=message.from_user.id, text="⚠ Неверный формат даты! Используйте YYYY-MM-DD")
@@ -956,14 +965,86 @@ async def export_tasks_to_csv(message: types.Message):
         
     except Exception as e:
         logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=message.from_user.id,f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+
+# ======================
+# ЭКСПОРТ ЗАДАЧ В CSV
+# ======================
+
+@dp.message_handler(lambda message: message.text == "📤 Экспорт (с исполненными)")
+async def export_tasks_to_csv2(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+        return  
+    """Экспорт всех задач в CSV файл с кодировкой win1251"""
+    try:
+        cursor = conn.cursor()
+        cursor.execute(""" SELECT id, 
+                              user_id as "Исполнитель", 
+                              task_text as "Задача", 
+                              status as "Статус", 
+                              deadline as "Срок"
+                        FROM tasks
+                        WHERE status NOT IN ('удалено')
+                        ORDER BY id DESC""")
+        tasks = cursor.fetchall()
+        
+        if not tasks:
+            await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет задач для экспорта.")
+            return
+
+        # Создаем CSV в памяти
+        output = io.BytesIO()
+        
+        # Используем TextIOWrapper с нужной кодировкой
+        text_buffer = io.TextIOWrapper(
+            output,
+            encoding='utf-8-sig',
+            errors='replace',  # заменяем некодируемые символы
+            newline=''
+        )
+        
+        writer = csv.writer(
+            text_buffer,
+            delimiter=';',  # Указываем нужный разделитель
+            quoting=csv.QUOTE_MINIMAL
+        )
+        
+        # Заголовки столбцов
+        headers = ['ID', 'Исполнитель', 'Задача', 'Статус', 'Срок']
+        writer.writerow(headers)
+        
+        # Данные
+        for task in tasks:
+            # Преобразуем все значения в строки
+            row = [
+                str(item) if item is not None else ''
+                for item in task
+            ]
+            writer.writerow(row)
+        
+        # Важно: закрыть TextIOWrapper перед использованием буфера
+        text_buffer.flush()
+        text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
+        output.seek(0)
+        
+        # Создаем временный файл
+        csv_file = InputFile(output, filename="tasks_export.csv")
+        
+        await message.reply_document(
+            document=csv_file
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
+        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
 # ЭКСПОРТ ЗАДАЧ В CSV (с удаленными)
 # ======================
 
-@dp.message_handler(commands=["export2"])
-async def export_tasks_to_csv(message: types.Message):
+@dp.message_handler(commands=["export3"])
+async def export_tasks_to_csv3(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Только администратор может делать полный экспорт")
         return
@@ -1022,7 +1103,7 @@ async def export_tasks_to_csv(message: types.Message):
         
     except Exception as e:
         logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=message.from_user.id,f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
 # УДАЛЕНИЕ ЗАДАЧ
@@ -1165,7 +1246,7 @@ async def cancel_task_deletion(callback_query: types.CallbackQuery):
 
 @dp.message_handler(commands=["myid"])
 async def get_user_id(message: types.Message):
-    await bot.send_message(chat_id=message.from_user.id,f"🆔 Ваш ID: `{message.from_user.id}`", parse_mode="Markdown")
+    await bot.send_message(chat_id=message.from_user.id,text=f"🆔 Ваш ID: `{message.from_user.id}`", parse_mode="Markdown")
 
 # ======================
 # ФОНОВЫЕ ЗАДАЧИ
