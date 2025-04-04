@@ -253,8 +253,8 @@ async def process_executor(message: types.Message, state: FSMContext):
     executor = message.text.strip()
 
     await state.update_data(executor=executor)
-    await bot.send_message(chat_id=message.from_user.id, text=
-        "⏳ Выберите срок или введите свой (можно без срока):",
+    await bot.send_message(chat_id=message.chat.id, text=
+        "⏳ Выберите срок или введите свой:",
         reply_markup=get_deadline_keyboard(with_none_option=True)
     )
     await TaskCreation.waiting_for_deadline.set()
@@ -478,7 +478,7 @@ async def status_select_task(message: types.Message):
         
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="status_manual_id"))
 
-        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для изменения статуса:", reply_markup=keyboard)
+        await bot.send_message(chat_id=message.chat.id, text="Выберите задачу для изменения статуса:", reply_markup=keyboard)
         await StatusUpdate.waiting_for_task_selection.set()
     except Exception as e:
         logger.error(f"Ошибка при получении списка задач: {e}")
@@ -526,7 +526,7 @@ async def show_status_options(message_obj, task_id):
         callback_data=f"set_status_{task_id}_{status}"
     ) for status in statuses]
     keyboard.add(*buttons)
-    await bot.send_message(chat_id=message_obj.from_user.id, text="📌 Выберите новый статус:", reply_markup=keyboard)
+    await bot.send_message(chat_id=message_obj.chat.id, text="📌 Выберите новый статус:", reply_markup=keyboard)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("set_status_"), state=StatusUpdate.waiting_for_status_choice)
 async def process_status_update(callback_query: types.CallbackQuery, state: FSMContext):
@@ -580,7 +580,7 @@ async def executor_select_task(message: types.Message):
         
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="executor_manual_id"))
 
-        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для изменения исполнителя:", reply_markup=keyboard)
+        await bot.send_message(chat_id=message.chat.id, text="Выберите задачу для изменения исполнителя:", reply_markup=keyboard)
         await ExecutorUpdate.waiting_for_task_selection.set()
         
     except Exception as e:
@@ -671,7 +671,7 @@ async def deadline_select_task(message: types.Message):
         
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="deadline_manual_id"))
 
-        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для изменения срока:", reply_markup=keyboard)
+        await bot.send_message(chat_id=message.chat.id, text="Выберите задачу для изменения срока:", reply_markup=keyboard)
         await TaskUpdate.waiting_for_task_selection.set()
     except Exception as e:
         logger.error(f"Ошибка при получении списка задач: {e}")
@@ -711,7 +711,7 @@ async def process_manual_task_id(message: types.Message, state: FSMContext):
 async def show_deadline_options(message_obj):
     """Показать варианты выбора срока"""
     keyboard = get_deadline_keyboard(with_none_option=True)
-    await bot.send_message(chat_id=message_obj.from_user.id, text="⏳ Выберите новый срок:", reply_markup=keyboard)
+    await bot.send_message(chat_id=message_obj.chat.id, text="⏳ Выберите новый срок:", reply_markup=keyboard)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("set_deadline_"), state=TaskUpdate.waiting_for_deadline_choice)
 async def process_deadline_choice(callback_query: types.CallbackQuery, state: FSMContext):
@@ -1138,7 +1138,7 @@ async def delete_task_start(message: types.Message):
         
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="enter_task_id_manually_delete"))
 
-        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для удаления или введите ID вручную:", reply_markup=keyboard)
+        await bot.send_message(chat_id=message.chat.id, text="Выберите задачу для удаления или введите ID вручную:", reply_markup=keyboard)
     except Exception as e:
         logger.error(f"Ошибка при выборе задачи для удаления: {e}")
         await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при получении списка задач.")
