@@ -145,16 +145,16 @@ async def start_command(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
 
-        if message.chat.type == "private":
-            await bot.send_message(chat_id=message.chat.id, text=
-                "👋 Привет! Я бот для управления задачами. Выберите команду:",
-                reply_markup=menu_keyboard
-            )
-        else:
-            await bot.send_message(chat_id=message.chat.id, text=
-                "👋 Привет! Я бот для управления задачами. Выберите команду:",
-                reply_markup=group_menu_keyboard
-            )
+    if message.chat.type == "private":
+        await bot.send_message(chat_id=message.chat.id, text=
+            "👋 Привет! Я бот для управления задачами. Выберите команду:",
+            reply_markup=menu_keyboard
+        )
+    else:
+        await bot.send_message(chat_id=message.chat.id, text=
+            "👋 Привет! Я бот для управления задачами. Выберите команду:",
+            reply_markup=group_menu_keyboard
+        )
 
 # Команды вызывают те же функции, что и кнопки
 @dp.message_handler(commands=["newtask"])
