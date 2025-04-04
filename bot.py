@@ -68,6 +68,7 @@ conn = init_db()
 menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 menu_keyboard.add(
     KeyboardButton("➕ Новая задача"),
+    KeyboardButton("⚡ Быстрая задача"),
     KeyboardButton("🔄 Изменить статус"),
     KeyboardButton("👤 Изменить исполнителя"),
     KeyboardButton("⏳ Изменить срок"),
@@ -112,6 +113,7 @@ from aiogram.types import ChatMemberUpdated, ChatType
 async def set_bot_commands(bot: Bot):
     commands = [
         BotCommand(command="/newtask", description="Создать задачу"),
+        BotCommand(command="/quicktask", description="Быстрая задача"),
         BotCommand(command="/setstatus", description="Изменить статус"),
         BotCommand(command="/setexecutor", description="Изменить исполнителя"),
         BotCommand(command="/setdeadline", description="Изменить срок"),
@@ -142,6 +144,13 @@ async def cmd_new_task(message: types.Message):
         await message.reply("⛔ Доступ запрещен")
         return  
     await new_task_start(message)  # Тот же обработчик, что и для кнопки "➕ Новая задача"
+
+@dp.message_handler(commands=["quicktask"])
+async def cmd_new_task(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return  
+    await quick_task_start(message)  # Тот же обработчик, что и для кнопки "⚡ Быстрая задача"
 
 @dp.message_handler(commands=["setstatus"])
 async def cmd_set_status(message: types.Message):
@@ -311,6 +320,70 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
         logger.error(f"Ошибка БД при сохранении задачи: {e}")
         reply_target = message_obj.message if isinstance(message_obj, types.CallbackQuery) else message_obj
         await reply_target.reply(f"⚠ Ошибка при сохранении задачи: {str(e)}")
+    finally:
+        await state.finish()
+
+# ======================
+# СОЗДАНИЕ ЗАДАЧИ ИЗ ОДНОГО СООБЩЕНИЯ
+# ======================
+
+class QuickTaskCreation(StatesGroup):
+    waiting_for_full_data = State()
+
+@dp.message_handler(lambda message: message.text == "⚡ Быстрая задача")
+async def quick_task_start(message: types.Message):
+    """Начало быстрого создания задачи"""
+    await message.reply(
+        "📝 Введите данные в формате:\n"
+        "<текст задачи> @исполнитель -срок"
+    )
+    await QuickTaskCreation.waiting_for_full_data.set()
+
+@dp.message_handler(state=QuickTaskCreation.waiting_for_full_data)
+async def process_quick_task(message: types.Message, state: FSMContext):
+    """Обработка быстрого создания задачи"""
+    try:
+        text = message.text
+        
+        # Парсим данные с помощью регулярных выражений
+        task_match = re.search(r'^(.*?)(\s@|$)', text)
+        executor_match = re.search(r'@(\S+)', text)
+        deadline_match = re.search(r'-(\d{4}-\d{2}-\d{2})', text)
+
+        task_text = task_match.group(1).strip() if task_match else None
+        executor = executor_match.group(1) if executor_match else None
+        deadline = deadline_match.group(1) if deadline_match else None
+
+        # Валидация обязательного поля
+        if not task_text:
+            raise ValueError("Не указан текст задачи")
+
+        # Проверка формата даты
+        if deadline:
+            datetime.strptime(deadline, "%Y-%m-%d")
+
+        # Сохранение в БД
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO tasks (user_id, chat_id, task_text, deadline) VALUES (?, ?, ?, ?)",
+            (executor, message.from_user.id, task_text, deadline)
+        )
+        conn.commit()
+
+        response = (
+            f"📌 <b>{task_text}</b>\n"
+            f"👤 {executor if executor else 'не указан'} ⏳ {deadline if deadline else 'не указан'}"
+        )
+        await message.reply(response)
+
+    except ValueError as e:
+        await message.reply(f"⚠ Ошибка: {str(e)}")
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка БД: {e}")
+        await message.reply("⚠ Ошибка при сохранении задачи")
+    except Exception as e:
+        logger.error(f"Ошибка: {str(e)}")
+        await message.reply("⚠ Неверный формат данных")
     finally:
         await state.finish()
 
@@ -1057,7 +1130,7 @@ async def check_deadlines():
             now = datetime.now().strftime("%Y-%m-%d")
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, user_id, chat_id, task_text, status FROM tasks WHERE deadline=? AND status != 'исполнено'", 
+                "SELECT id, user_id, chat_id, task_text, status FROM tasks WHERE deadline=? AND status not in ('исполнено','удалено')", 
                 (now,)
             )
             tasks = cursor.fetchall()
