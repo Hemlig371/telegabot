@@ -329,6 +329,45 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
 # СОЗДАНИЕ ЗАДАЧИ ИЗ ОДНОГО СООБЩЕНИЯ
 # ======================
 
+def parse_deadline(deadline_str: str) -> str:
+    """Преобразует текстовое представление даты в формат YYYY-MM-DD"""
+    today = datetime.today()
+    weekday_map = {
+        'пн': 0, 'пон': 0, 'понедельник': 0,
+        'вт': 1, 'вто': 1, 'вторник': 1,
+        'ср': 2, 'сре': 2, 'среда': 2,
+        'чт': 3, 'чет': 3, 'четверг': 3,
+        'пт': 4, 'пят': 4, 'пятница': 4,
+        'сб': 5, 'суб': 5, 'суббота': 5,
+        'вс': 6, 'вос': 6, 'воскресенье': 6
+    }
+    
+    lower_str = deadline_str.lower()
+    
+    if lower_str == 'сегодня':
+        return today.strftime("%Y-%m-%d")
+    
+    if lower_str == 'завтра':
+        return (today + timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    if lower_str in weekday_map:
+        target_weekday = weekday_map[lower_str]
+        current_weekday = today.weekday()
+        
+        days_ahead = target_weekday - current_weekday
+        if days_ahead <= 0:
+            days_ahead += 7
+            
+        return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+    
+    # Проверяем стандартный формат даты
+    try:
+        datetime.strptime(deadline_str, "%Y-%m-%d")
+        return deadline_str
+    except ValueError:
+        raise ValueError(f"Неверный формат даты: {deadline_str}")
+
+
 class QuickTaskCreation(StatesGroup):
     waiting_for_full_data = State()
 
@@ -349,12 +388,13 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         text = message.text or message.caption
         
         # Парсим данные с помощью регулярных выражений
-        task_match = re.search(r'^(.*?)(\s@|$)', text)
+        task_match = re.search(r'^(.*?)(?=\s*@|$)', text)
         executor_match = re.search(r'@(\S+)', text)
-        deadline_match = re.search(r'-(\d{4}-\d{2}-\d{2})', text)
+        deadline_match = re.search(r'-(\S+)', text)
+        deadline_raw = deadline_match.group(1) if deadline_match else None
 
         task_text = task_match.group(1).strip() if task_match else None
-        executor = executor_match.group(1) if executor_match else None
+        executor = executor_match.group(0) if executor_match else None
         deadline = deadline_match.group(1) if deadline_match else None
 
         # Валидация обязательного поля
@@ -362,8 +402,13 @@ async def process_quick_task(message: types.Message, state: FSMContext):
             raise ValueError("Не указан текст задачи")
 
         # Проверка формата даты
-        if deadline:
-            datetime.strptime(deadline, "%Y-%m-%d")
+        deadline_raw = deadline_match.group(1) if deadline_match else None
+        deadline = None
+        if deadline_raw:
+            try:
+                deadline = parse_deadline(deadline_raw)
+            except ValueError as e:
+                raise ValueError(f"Ошибка в сроке: {str(e)}")
 
         # Сохранение в БД
         cursor = conn.cursor()
