@@ -69,6 +69,7 @@ menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 menu_keyboard.add(
     KeyboardButton("➕ Новая задача"),
     KeyboardButton("🔄 Изменить статус"),
+    KeyboardButton("👤 Изменить исполнителя"),
     KeyboardButton("⏳ Изменить срок"),
     KeyboardButton("📋 Список задач"),
     KeyboardButton("📤 Экспорт задач")
@@ -112,9 +113,12 @@ async def set_bot_commands(bot: Bot):
     commands = [
         BotCommand(command="/newtask", description="Создать задачу"),
         BotCommand(command="/setstatus", description="Изменить статус"),
+        BotCommand(command="/setexecutor", description="Изменить исполнителя"),
         BotCommand(command="/setdeadline", description="Изменить срок"),
         BotCommand(command="/listtasks", description="Список задач"),
         BotCommand(command="/export", description="Экспорт в CSV"),
+        BotCommand(command="/start", description="Старт бота"),
+        BotCommand(command="/myid", description="Узнать свой ID"),
         BotCommand(command="/export2", description="Полный экспорт (админ)"),
         BotCommand(command="/deletetask", description="Удалить задачу (админ)")
     ]
@@ -145,6 +149,13 @@ async def cmd_set_status(message: types.Message):
         await message.reply("⛔ Доступ запрещен")
         return  
     await status_select_task(message)  # Аналогично кнопке "🔄 Изменить статус"
+
+@dp.message_handler(commands=["setexecutor"])
+async def cmd_set_executor(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("⛔ Доступ запрещен")
+        return  
+    await executor_select_task(message)  # Аналогично кнопке "👤 Изменить исполнителя"
 
 @dp.message_handler(commands=["setdeadline"])
 async def cmd_set_deadline(message: types.Message):
@@ -328,10 +339,6 @@ async def status_select_task(message: types.Message):
         """, (message.from_user.id,))
         tasks = cursor.fetchall()
 
-        if not tasks:
-            await message.reply("📭 У вас нет задач для изменения статуса.")
-            return
-
         keyboard = InlineKeyboardMarkup(row_width=1)
         for task_id, task_text, status in tasks:
             keyboard.add(InlineKeyboardButton(
@@ -434,10 +441,6 @@ async def executor_select_task(message: types.Message):
         """, (message.from_user.id,))
         tasks = cursor.fetchall()
 
-        if not tasks:
-            await message.reply("📭 У вас нет задач для изменения исполнителя.")
-            return
-
         keyboard = InlineKeyboardMarkup(row_width=1)
         for task_id, task_text, current_executor in tasks:
             keyboard.add(InlineKeyboardButton(
@@ -528,10 +531,6 @@ async def deadline_select_task(message: types.Message):
             LIMIT 5
         """, (message.from_user.id,))
         tasks = cursor.fetchall()
-
-        if not tasks:
-            await message.reply("📭 У вас нет задач для изменения срока.")
-            return
 
         keyboard = InlineKeyboardMarkup(row_width=1)
         for task_id, task_text, deadline in tasks:
@@ -691,7 +690,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
                 f"🔹 ID: {task_id} 👤: {user_id}\n"
                 f"📝: {task_text}\n"
                 f"🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
-                f"──────────────────"
+                f"──────────"
             )
 
         # Создаем клавиатуру пагинации
@@ -1058,16 +1057,16 @@ async def check_deadlines():
             now = datetime.now().strftime("%Y-%m-%d")
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, chat_id, task_text FROM tasks WHERE deadline=? AND status != 'исполнено'", 
+                "SELECT id, user_id, chat_id, task_text, status FROM tasks WHERE deadline=? AND status != 'исполнено'", 
                 (now,)
             )
             tasks = cursor.fetchall()
 
-            for task_id, chat_id, task_text in tasks:
+            for task_id, chat_id, task_text, user_id, status in tasks:
                 try:
                     await bot.send_message(
                         chat_id,
-                        f"⏳ Напоминание о задаче {task_id}:\n{task_text}"
+                        f"⏳ Напоминание о задаче 🔹{task_id}:\n📝{task_text}\n👤: {user_id} 🔄: {status}"
                     )
                 except Exception as e:
                     logger.error(f"Ошибка при отправке напоминания: {e}")
