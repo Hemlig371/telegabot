@@ -20,7 +20,6 @@ from aiogram.types import InputFile
 
 from aiogram.utils import exceptions
 from aiogram.types import ChatMemberUpdated, ChatType
-from aiogram.dispatcher.middlewares import BaseMiddleware
 
 # Настройка логирования
 logging.basicConfig(
@@ -833,7 +832,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
             page = total_pages
         
         # Получаем задачи для текущей страницы
-        if message.chat.type = "private":
+        if message.chat.type == "private":
             cursor.execute("""
                 SELECT id, user_id, task_text, status, deadline 
                 FROM tasks 
