@@ -99,14 +99,24 @@ def get_deadline_keyboard(with_none_option=False):
         "Послезавтра": (today + timedelta(days=2)).strftime("%Y-%m-%d"),
     }
 
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    for label, date in dates.items():
-        keyboard.add(InlineKeyboardButton(label, callback_data=f"set_deadline_{date}"))
+    keyboard = InlineKeyboardMarkup(row_width=2)  # 2 кнопки в ряду
     
+    # Добавляем кнопки парами
+    buttons = []
+    for label, date in dates.items():
+        buttons.append(InlineKeyboardButton(label, callback_data=f"set_deadline_{date}"))
+    
+    # Распределяем кнопки по 2 в ряд
+    for i in range(0, len(buttons), 2):
+        row = buttons[i:i+2]
+        keyboard.row(*row)
+    
+    # Дополнительные кнопки
     if with_none_option:
         keyboard.add(InlineKeyboardButton("❌ Без срока", callback_data="set_deadline_none"))
     
     keyboard.add(InlineKeyboardButton("Свой срок", callback_data="set_deadline_custom"))
+    
     return keyboard
 
 # Клавиатура выбора статуса
@@ -177,7 +187,7 @@ async def cmd_set_status(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     if message.chat.type != "private":
-        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только ЛС")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Менять статус можно только в ЛС")
         return
     await status_select_task(message)  # Аналогично кнопке "🔄 Изменить статус"
 
@@ -187,7 +197,7 @@ async def cmd_set_executor(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
     if message.chat.type != "private":
-        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только ЛС")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Менять исполнителя можно только в ЛС")
         return
     await executor_select_task(message)  # Аналогично кнопке "👤 Изменить исполнителя"
 
@@ -197,7 +207,7 @@ async def cmd_set_deadline(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     if message.chat.type != "private":
-        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только ЛС")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Менять срок можно только в ЛС")
         return
     await deadline_select_task(message)  # Аналогично кнопке "⏳ Изменить срок"
 
