@@ -385,10 +385,10 @@ async def quick_task_start(message: types.Message):
 async def process_quick_task(message: types.Message, state: FSMContext):
     """Обработка быстрого создания задачи"""
     try:
-        text = message.text or message.caption
+        text = message.text if message.text else message.forward_from_message.caption if message.forward_from_message else None
         
         # Парсим данные с помощью регулярных выражений
-        task_match = re.search(r'^(.*?)(?=\s*@|$)', text)
+        task_match = re.search(r'^(.*?)(\s@|$)', text)
         executor_match = re.search(r'@(\S+)', text)
         deadline_match = re.search(r'-(\S+)', text)
         deadline_raw = deadline_match.group(1) if deadline_match else None
