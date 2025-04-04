@@ -234,7 +234,7 @@ async def new_task_start(message: types.Message):
 @dp.message_handler(state=TaskCreation.waiting_for_title)
 async def process_title(message: types.Message, state: FSMContext):
     """Обработка названия задачи"""
-    await state.update_data(title=message.text)
+    await state.update_data(title=message.text if message.text else message.forward_from_message.caption if message.forward_from_message else None)
     await message.reply("👤 Исполнитель (@username):")
     await TaskCreation.waiting_for_executor.set()
 
