@@ -134,7 +134,7 @@ async def start_command(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
     
-    await bot.send_message(chat_id=message.from_user.id,
+    await bot.send_message(chat_id=message.from_user.id, text=
         "👋 Привет! Я бот для управления задачами. Выберите команду:",
         reply_markup=menu_keyboard
     )
@@ -244,7 +244,7 @@ async def process_executor(message: types.Message, state: FSMContext):
     executor = message.text.strip()
 
     await state.update_data(executor=executor)
-    await bot.send_message(chat_id=message.from_user.id,
+    await bot.send_message(chat_id=message.from_user.id, text=
         "⏳ Выберите срок или введите свой (можно без срока):",
         reply_markup=get_deadline_keyboard(with_none_option=True)
     )
@@ -374,7 +374,7 @@ class QuickTaskCreation(StatesGroup):
 @dp.message_handler(lambda message: message.text == "⚡ Быстрая задача")
 async def quick_task_start(message: types.Message):
     """Начало быстрого создания задачи"""
-    await bot.send_message(chat_id=message.from_user.id,
+    await bot.send_message(chat_id=message.from_user.id, text=
         "📝 Введите данные в формате:\n"
         "текст задачи @исполнитель -срок"
     )
