@@ -19,6 +19,7 @@ import io
 from aiogram.types import InputFile
 
 from aiogram.utils import exceptions
+from aiogram.types import ChatMemberUpdated, ChatType
 from aiogram.dispatcher.middlewares import BaseMiddleware
 
 # Настройка логирования
@@ -66,14 +67,29 @@ conn = init_db()
 # Привязка состояния к пользователю
 class UserIDMiddleware(BaseMiddleware):
     async def on_pre_process_message(self, message: types.Message, data: dict):
-        if message.chat.type == "private" and 'state' in data:
-            data["state"]._chat_id = message.from_user.id
+        # Для ЛС принудительно инициализируем state, если его нет
+        if message.chat.type == "private":
+            if 'state' not in data:
+                # Создаем state вручную
+                data['state'] = FSMContext(
+                    storage=dp.storage,  # Берем хранилище из диспетчера
+                    chat=message.chat.id,
+                    user=message.from_user.id
+                )
+            data["state"]._chat_id = message.from_user.id  # Привязываем chat_id
 
     async def on_pre_process_callback_query(self, callback_query: types.CallbackQuery, data: dict):
-        if callback_query.message.chat.type == "private" and 'state' in data:
-            data["state"]._chat_id = callback_query.from_user.id
+        # Для ЛС принудительно инициализируем state, если его нет
+        if callback_query.message.chat.type == "private":
+            if 'state' not in data:
+                data['state'] = FSMContext(
+                    storage=dp.storage,  # Берем хранилище из диспетчера
+                    chat=callback_query.message.chat.id,
+                    user=callback_query.from_user.id
+                )
+            data["state"]._chat_id = callback_query.from_user.id  # Привязываем chat_id
 
-# Подключите middleware
+# Подключение мидлвари (оставить в конце, после создания dp)
 dp.middleware.setup(UserIDMiddleware())
 
 # ======================
@@ -119,8 +135,6 @@ def get_status_keyboard(task_id):
     buttons = [InlineKeyboardButton(status, callback_data=f"set_status_{task_id}_{status}") for status in statuses]
     keyboard.add(*buttons)
     return keyboard
-
-from aiogram.types import ChatMemberUpdated, ChatType
 
 # ======================
 # ОБРАБОТЧИКИ КОМАНД
