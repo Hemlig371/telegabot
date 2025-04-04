@@ -812,11 +812,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
     try:
         cursor = conn.cursor()
         # Получаем общее количество задач
-        if message.chat.type != "private":
-            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено')")
-        else:
-            cursor.execute("SELECT COUNT(*) FROM tasks WHERE chat_id=? AND status NOT IN ('удалено','исполнено')",(message.from_user.id,))
-          
+        cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено')")  
         total_tasks = cursor.fetchone()[0]
         
         if total_tasks == 0:
@@ -832,22 +828,13 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
             page = total_pages
         
         # Получаем задачи для текущей страницы
-        if message.chat.type == "private":
-            cursor.execute("""
-                SELECT id, user_id, task_text, status, deadline 
-                FROM tasks 
-                WHERE chat_id=? AND status NOT IN ('удалено','исполнено')
-                ORDER BY id DESC 
-                LIMIT 5 OFFSET ?
-            """, (message.from_user.id, page * 5))
-        else:
-            cursor.execute("""
-                SELECT id, user_id, task_text, status, deadline 
-                FROM tasks 
-                WHERE status NOT IN ('удалено','исполнено')
-                ORDER BY id DESC 
-                LIMIT 5 OFFSET ?
-            """, (page * 5))
+        cursor.execute("""
+            SELECT id, user_id, task_text, status, deadline 
+            FROM tasks 
+            WHERE status NOT IN ('удалено','исполнено')
+            ORDER BY id DESC 
+            LIMIT 5 OFFSET ?
+        """, (page * 5))
         tasks = cursor.fetchall()
 
         # Формируем сообщение
