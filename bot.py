@@ -66,13 +66,11 @@ conn = init_db()
 # Привязка состояния к пользователю
 class UserIDMiddleware(BaseMiddleware):
     async def on_pre_process_message(self, message: types.Message, data: dict):
-        # Для ЛС используем user_id как chat_id
-        if message.chat.type == "private":
+        if message.chat.type == "private" and 'state' in data:
             data["state"]._chat_id = message.from_user.id
 
     async def on_pre_process_callback_query(self, callback_query: types.CallbackQuery, data: dict):
-        # Для ЛС используем user_id как chat_id
-        if callback_query.message.chat.type == "private":
+        if callback_query.message.chat.type == "private" and 'state' in data:
             data["state"]._chat_id = callback_query.from_user.id
 
 # Подключите middleware
