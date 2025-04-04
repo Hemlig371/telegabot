@@ -64,34 +64,6 @@ def init_db():
 
 conn = init_db()
 
-# Привязка состояния к пользователю
-class UserIDMiddleware(BaseMiddleware):
-    async def on_pre_process_message(self, message: types.Message, data: dict):
-        # Для ЛС принудительно инициализируем state, если его нет
-        if message.chat.type == "private":
-            if 'state' not in data:
-                # Создаем state вручную
-                data['state'] = FSMContext(
-                    storage=dp.storage,  # Берем хранилище из диспетчера
-                    chat=message.chat.id,
-                    user=message.from_user.id
-                )
-            data["state"]._chat_id = message.from_user.id  # Привязываем chat_id
-
-    async def on_pre_process_callback_query(self, callback_query: types.CallbackQuery, data: dict):
-        # Для ЛС принудительно инициализируем state, если его нет
-        if callback_query.message.chat.type == "private":
-            if 'state' not in data:
-                data['state'] = FSMContext(
-                    storage=dp.storage,  # Берем хранилище из диспетчера
-                    chat=callback_query.message.chat.id,
-                    user=callback_query.from_user.id
-                )
-            data["state"]._chat_id = callback_query.from_user.id  # Привязываем chat_id
-
-# Подключение мидлвари (оставить в конце, после создания dp)
-dp.middleware.setup(UserIDMiddleware())
-
 # ======================
 # КЛАВИАТУРЫ И ИНТЕРФЕЙС
 # ======================
@@ -107,6 +79,15 @@ menu_keyboard.add(
     KeyboardButton("📋 Список задач"),
     KeyboardButton("📤 Экспорт задач"),
     KeyboardButton("📤 Экспорт (с исполненными)")
+)
+
+# Клавиатура для групповых чатов
+group_menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+group_menu_keyboard.add(
+    KeyboardButton("➕ Новая задача"),
+    KeyboardButton("⚡ Быстрая задача"),
+    KeyboardButton("📋 Список задач"),
+    KeyboardButton("📤 Экспорт задач")
 )
 
 # Клавиатура выбора даты
@@ -163,11 +144,17 @@ async def start_command(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
-    
-    await bot.send_message(chat_id=message.chat.id, text=
-        "👋 Привет! Я бот для управления задачами. Выберите команду:",
-        reply_markup=menu_keyboard
-    )
+
+        if message.chat.type == "private":
+            await bot.send_message(chat_id=message.chat.id, text=
+                "👋 Привет! Я бот для управления задачами. Выберите команду:",
+                reply_markup=menu_keyboard
+            )
+        else:
+            await bot.send_message(chat_id=message.chat.id, text=
+                "👋 Привет! Я бот для управления задачами. Выберите команду:",
+                reply_markup=group_menu_keyboard
+            )
 
 # Команды вызывают те же функции, что и кнопки
 @dp.message_handler(commands=["newtask"])
@@ -281,7 +268,7 @@ async def process_executor(message: types.Message, state: FSMContext):
     executor = message.text.strip()
 
     await state.update_data(executor=executor)
-    await bot.send_message(chat_id=message.from_user.id, text=
+    await bot.send_message(chat_id=message.chat.id, text=
         "⏳ Выберите срок или введите свой:",
         reply_markup=get_deadline_keyboard(with_none_option=True)
     )
@@ -834,7 +821,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
         cursor.execute("""
             SELECT id, user_id, task_text, status, deadline 
             FROM tasks 
-            WHERE chat_id=? AND status<>'удалено'
+            WHERE chat_id=? AND status NOT IN ('удалено','исполнено')
             ORDER BY id DESC 
             LIMIT 5 OFFSET ?
         """, (message.from_user.id, page * 5))
@@ -866,7 +853,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
         
         # Всегда отправляем новое сообщение
         sent_message = await bot.send_message(
-            chat_id=message.from_user.id,
+            chat_id=message.chat.id,
             text=f"📋 Список задач (страница {page+1} из {total_pages+1}):\n\n" + "\n".join(result),
             reply_markup=keyboard
         )
