@@ -834,7 +834,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
             WHERE status NOT IN ('удалено','исполнено')
             ORDER BY id DESC 
             LIMIT 5 OFFSET ?
-        """, (page * 5))
+        """, (page * 5,))
         tasks = cursor.fetchall()
 
         # Формируем сообщение
