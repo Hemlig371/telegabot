@@ -371,7 +371,7 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         conn.commit()
 
         response = (
-            f"📌 <b>{task_text}</b>\n"
+            f"📌 {task_text}\n"
             f"👤 {executor if executor else 'не указан'} ⏳ {deadline if deadline else 'не указан'}"
         )
         await message.reply(response)
