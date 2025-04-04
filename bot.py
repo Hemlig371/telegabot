@@ -99,7 +99,7 @@ def get_deadline_keyboard(with_none_option=False):
         "Послезавтра": (today + timedelta(days=2)).strftime("%Y-%m-%d"),
     }
 
-    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard = InlineKeyboardMarkup(row_width=2)
     for label, date in dates.items():
         keyboard.add(InlineKeyboardButton(label, callback_data=f"set_deadline_{date}"))
     
@@ -176,13 +176,19 @@ async def cmd_set_status(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
+    if message.chat.type != "private":
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только ЛС")
+        return
     await status_select_task(message)  # Аналогично кнопке "🔄 Изменить статус"
 
 @dp.message_handler(commands=["setexecutor"])
 async def cmd_set_executor(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
-        return  
+        return
+    if message.chat.type != "private":
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только ЛС")
+        return
     await executor_select_task(message)  # Аналогично кнопке "👤 Изменить исполнителя"
 
 @dp.message_handler(commands=["setdeadline"])
@@ -190,6 +196,9 @@ async def cmd_set_deadline(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
+    if message.chat.type != "private":
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только ЛС")
+        return
     await deadline_select_task(message)  # Аналогично кнопке "⏳ Изменить срок"
 
 @dp.message_handler(commands=["listtasks"])
@@ -233,14 +242,6 @@ class TaskDeletion(StatesGroup):
     waiting_for_task_selection = State()
     waiting_for_confirmation = State()
     waiting_for_manual_id = State()
-
-# ======================
-# ОБРАБОТЧИКИ КОМАНД
-# ======================
-
-@dp.message_handler(commands=["start"])
-async def start_command(message: types.Message):
-    await bot.send_message(chat_id=message.from_user.id, text="👋 Привет! Я бот для управления задачами. Используйте кнопки ниже:")
 
 # ======================
 # СОЗДАНИЕ ЗАДАЧ
