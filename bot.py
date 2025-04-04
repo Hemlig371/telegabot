@@ -335,7 +335,7 @@ async def quick_task_start(message: types.Message):
     """Начало быстрого создания задачи"""
     await message.reply(
         "📝 Введите данные в формате:\n"
-        "<текст задачи> @исполнитель -срок"
+        "текст задачи @исполнитель -срок"
     )
     await QuickTaskCreation.waiting_for_full_data.set()
 
@@ -371,7 +371,7 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         conn.commit()
 
         response = (
-            f"📌 {task_text}\n"
+            f"📌 <b>{task_text}</b>\n"
             f"👤 {executor if executor else 'не указан'} ⏳ {deadline if deadline else 'не указан'}"
         )
         await message.reply(response)
