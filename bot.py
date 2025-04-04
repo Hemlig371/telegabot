@@ -341,11 +341,12 @@ async def quick_task_start(message: types.Message):
     )
     await QuickTaskCreation.waiting_for_full_data.set()
 
-@dp.message_handler(state=QuickTaskCreation.waiting_for_full_data)
+@dp.message_handler(state=QuickTaskCreation.waiting_for_full_data,
+                    content_types=types.ContentType.ANY)
 async def process_quick_task(message: types.Message, state: FSMContext):
     """Обработка быстрого создания задачи"""
     try:
-        text = message.text
+        text = message.text or message.caption
         
         # Парсим данные с помощью регулярных выражений
         task_match = re.search(r'^(.*?)(\s@|$)', text)
@@ -1132,18 +1133,18 @@ async def check_deadlines():
             now = datetime.now().strftime("%Y-%m-%d")
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, chat_id, task_text FROM tasks "
+                "SELECT id, chat_id, task_text, user_id, status, deadline FROM tasks "
                 "WHERE deadline=? AND status NOT IN ('исполнено','удалено')", 
                 (now,)
             )
             tasks = cursor.fetchall()
 
-            for task_id, chat_id, task_text in tasks:
+            for task_id, chat_id, task_text, user_id, status, deadline in tasks:
                 try:
                     # Отправляем в ЛС создателя (chat_id == user_id)
                     await bot.send_message(
                         chat_id=chat_id,
-                        text=f"⏳ Напоминание о задаче {task_id}:\n{task_text}"
+                        text=f"⏳ Напоминание о задаче {task_id}:\n{task_text}\n\n{user_id}\n{status} {deadline}"
                     )
                 except exceptions.BotBlocked:
                     logger.error(f"Пользователь {chat_id} заблокировал бота")
