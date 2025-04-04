@@ -18,6 +18,8 @@ import csv
 import io
 from aiogram.types import InputFile
 
+from aiogram.utils import exceptions
+
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
@@ -1124,29 +1126,35 @@ async def get_user_id(message: types.Message):
 # ======================
 
 async def check_deadlines():
-    """Проверка дедлайнов и отправка напоминаний"""
+    """Проверка дедлайнов и отправка напоминаний создателю"""
     while True:
         try:
             now = datetime.now().strftime("%Y-%m-%d")
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, user_id, chat_id, task_text, status FROM tasks WHERE deadline=? AND status not in ('исполнено','удалено')", 
+                "SELECT id, chat_id, task_text FROM tasks "
+                "WHERE deadline=? AND status NOT IN ('исполнено','удалено')", 
                 (now,)
             )
             tasks = cursor.fetchall()
 
-            for task_id, chat_id, task_text, user_id, status in tasks:
+            for task_id, chat_id, task_text in tasks:
                 try:
+                    # Отправляем в ЛС создателя (chat_id == user_id)
                     await bot.send_message(
-                        chat_id,
-                        f"⏳ Напоминание о задаче 🔹{task_id}:\n📝{task_text}\n👤: {user_id} 🔄: {status}"
+                        chat_id=chat_id,
+                        text=f"⏳ Напоминание о задаче {task_id}:\n{task_text}"
                     )
+                except exceptions.BotBlocked:
+                    logger.error(f"Пользователь {chat_id} заблокировал бота")
+                except exceptions.ChatNotFound:
+                    logger.error(f"Чат {chat_id} не найден")
                 except Exception as e:
-                    logger.error(f"Ошибка при отправке напоминания: {e}")
+                    logger.error(f"Ошибка: {e}")
 
-            await asyncio.sleep(10800)  # Проверка раз в 3 часа
+            await asyncio.sleep(10800)
         except Exception as e:
-            logger.error(f"Ошибка в фоновой задаче проверки дедлайнов: {e}")
+            logger.error(f"Ошибка в фоновой задаче: {e}")
             await asyncio.sleep(60)
 
 # ======================
