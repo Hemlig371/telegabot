@@ -647,6 +647,7 @@ async def process_status_update(callback_query: types.CallbackQuery, state: FSMC
 # ======================
 
 class ExecutorUpdate(StatesGroup):
+    waiting_for_executor = State()
     waiting_for_task_selection = State()
     waiting_for_new_executor = State()
 
@@ -656,32 +657,63 @@ async def executor_select_task(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
     
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+    executors = cursor.fetchall()
+    
+    if not executors:
+        await message.reply("❌ Нет задач для изменения исполнителя")
+        return
+
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    for i in range(0, len(executors), 2):
+        row = executors[i:i+2]
+        row_buttons = [
+            InlineKeyboardButton(
+                f"👤 {executor[0]}",
+                callback_data=f"executor_filter|{executor[0]}"
+            ) for executor in row
+        ]
+        keyboard.add(*row_buttons)
+    
+    keyboard.add(InlineKeyboardButton("✏️ Ввести ID задачи", callback_data="executor_manual_id"))
+    await message.reply("Выберите исполнителя для фильтрации задач:", reply_markup=keyboard)
+    await ExecutorUpdate.waiting_for_executor.set()
+
+@dp.callback_query_handler(lambda c: c.data.startswith("executor_filter|"), state=ExecutorUpdate.waiting_for_executor)
+async def process_executor_filter(callback_query: types.CallbackQuery, state: FSMContext):
+    executor = callback_query.data.split("|")[-1]
+    await state.update_data(executor=executor)
+    await show_executor_tasks(callback_query.message, executor)
+    await ExecutorUpdate.waiting_for_task_selection.set()
+
+async def show_executor_tasks(message_obj, executor):
     try:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT id, task_text, user_id 
-            FROM tasks
-            WHERE chat_id=? AND status<>'удалено'
+            FROM tasks 
+            WHERE user_id=? AND status<>'удалено'
             ORDER BY id DESC 
-            LIMIT 5
-        """, (message.from_user.id,))
+            LIMIT 20
+        """, (executor,))
+        
         tasks = cursor.fetchall()
 
         keyboard = InlineKeyboardMarkup(row_width=1)
         for task_id, task_text, current_executor in tasks:
             keyboard.add(InlineKeyboardButton(
-                f"{task_text[:30]}... (ID: {task_id}, текущий: {current_executor})", 
+                f"{task_text[:30]}... (ID: {task_id})", 
                 callback_data=f"executor_task_{task_id}"
             ))
         
-        keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="executor_manual_id"))
-
-        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для изменения исполнителя:", reply_markup=keyboard)
-        await ExecutorUpdate.waiting_for_task_selection.set()
-        
+        await bot.send_message(
+            chat_id=message_obj.chat.id,
+            text=f"Задачи исполнителя {executor}:",
+            reply_markup=keyboard
+        )
     except Exception as e:
-        logger.error(f"Ошибка при получении списка задач: {e}")
-        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при получении списка задач")
+        logger.error(f"Ошибка при получении задач: {e}")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("executor_task_"), state=ExecutorUpdate.waiting_for_task_selection)
 async def process_selected_task_executor(callback_query: types.CallbackQuery, state: FSMContext):
@@ -737,41 +769,74 @@ async def process_new_executor(message: types.Message, state: FSMContext):
 # ======================
 
 class TaskUpdate(StatesGroup):
-    waiting_for_task_selection = State()  # Для выбора задачи
-    waiting_for_deadline_choice = State()  # Для выбора типа срока
-    waiting_for_custom_deadline = State()  # Для ввода даты вручную
+    waiting_for_executor = State()
+    waiting_for_task_selection = State()
+    waiting_for_deadline_choice = State()
+    waiting_for_custom_deadline = State()
 
 @dp.message_handler(lambda message: message.text == "⏳ Изменить срок")
 async def deadline_select_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
-        return  
-    """Показ списка задач для изменения срока"""
+        return
+    
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+    executors = cursor.fetchall()
+    
+    if not executors:
+        await message.reply("❌ Нет задач для изменения срока")
+        return
+
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    for i in range(0, len(executors), 2):
+        row = executors[i:i+2]
+        row_buttons = [
+            InlineKeyboardButton(
+                f"👤 {executor[0]}",
+                callback_data=f"deadline_filter|{executor[0]}"
+            ) for executor in row
+        ]
+        keyboard.add(*row_buttons)
+    
+    keyboard.add(InlineKeyboardButton("✏️ Ввести ID задачи", callback_data="deadline_manual_id"))
+    await message.reply("Выберите исполнителя для фильтрации задач:", reply_markup=keyboard)
+    await TaskUpdate.waiting_for_executor.set()
+
+@dp.callback_query_handler(lambda c: c.data.startswith("deadline_filter|"), state=TaskUpdate.waiting_for_executor)
+async def process_deadline_filter(callback_query: types.CallbackQuery, state: FSMContext):
+    executor = callback_query.data.split("|")[-1]
+    await state.update_data(executor=executor)
+    await show_deadline_tasks(callback_query.message, executor)
+    await TaskUpdate.waiting_for_task_selection.set()
+
+async def show_deadline_tasks(message_obj, executor):
     try:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT id, task_text, deadline 
-            FROM tasks
-            WHERE chat_id=? AND status<>'удалено'
+            FROM tasks 
+            WHERE user_id=? AND status<>'удалено'
             ORDER BY id DESC 
-            LIMIT 5
-        """, (message.from_user.id,))
+            LIMIT 20
+        """, (executor,))
+        
         tasks = cursor.fetchall()
 
         keyboard = InlineKeyboardMarkup(row_width=1)
         for task_id, task_text, deadline in tasks:
             keyboard.add(InlineKeyboardButton(
-                f"{task_text[:30]}... (ID: {task_id}, Срок: {deadline})", 
+                f"{task_text[:30]}... (ID: {task_id})", 
                 callback_data=f"deadline_task_{task_id}"
             ))
         
-        keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="deadline_manual_id"))
-
-        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для изменения срока:", reply_markup=keyboard)
-        await TaskUpdate.waiting_for_task_selection.set()
+        await bot.send_message(
+            chat_id=message_obj.chat.id,
+            text=f"Задачи исполнителя {executor}:",
+            reply_markup=keyboard
+        )
     except Exception as e:
-        logger.error(f"Ошибка при получении списка задач: {e}")
-        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при получении списка задач")
+        logger.error(f"Ошибка при получении задач: {e}")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("deadline_task_"), state=TaskUpdate.waiting_for_task_selection)
 async def process_selected_task(callback_query: types.CallbackQuery, state: FSMContext):
