@@ -87,10 +87,10 @@ menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 menu_keyboard.add(
     KeyboardButton("➕ Новая задача"),
     KeyboardButton("⚡ Быстрая задача"),
+    KeyboardButton("📋 Список задач"),
     KeyboardButton("🔄 Изменить статус"),
     KeyboardButton("👤 Изменить исполнителя"),
     KeyboardButton("⏳ Изменить срок"),
-    KeyboardButton("📋 Список задач"),
     KeyboardButton("📤 Экспорт задач"),
     KeyboardButton("📤 Экспорт (с исполненными)")
 )
@@ -968,11 +968,15 @@ async def list_tasks(message: types.Message):
             await message.reply("❌ Нет задач для отображения")
             return
         keyboard = InlineKeyboardMarkup(row_width=2)
-        for executor in executors:
-            keyboard.add(InlineKeyboardButton(
-                f"👤 {executor[0] if executor[0] else 'Без исполнителя'}",
-                callback_data=f"listtasks_executor|{executor[0]}"
-            ))
+        for i in range(0, len(executors), 2):
+            row = executors[i:i+2]
+            row_buttons = [
+                InlineKeyboardButton(
+                    f"👤 {executor[0] if executor[0] else 'Без исполнителя'}",
+                    callback_data=f"listtasks_executor|{executor[0]}"
+                ) for executor in row
+            ]
+            keyboard.add(*row_buttons)
         await message.reply("Выберите исполнителя для фильтрации задач:", reply_markup=keyboard)
     except Exception as e:
         logger.error(f"Ошибка при получении списка задач: {str(e)}")
@@ -1339,7 +1343,7 @@ async def delete_task_start(message: types.Message):
             SELECT id, task_text, status 
             FROM tasks
             ORDER BY id DESC 
-            LIMIT 5
+            LIMIT 10
         """)
         tasks = cursor.fetchall()
 
