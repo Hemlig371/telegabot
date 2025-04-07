@@ -348,7 +348,9 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
             await save_task(message, state, message.text.strip())
             
     except ValueError:
-        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка! Введите дату в формате YYYY-MM-DD.")
+        # Определяем клавиатуру в зависимости от типа чата
+        reply_markup = menu_keyboard if chat_type == "private" else group_menu_keyboard
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка! Введите дату в формате YYYY-MM-DD.", reply_markup=reply_markup)
         await state.finish()
 
 async def save_task(message_obj, state: FSMContext, deadline: str):
@@ -361,10 +363,12 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
         # Получаем chat_id и тип чата
         if isinstance(message_obj, types.CallbackQuery):
             chat_id = message_obj.from_user.id
+            chat_id2 = message_obj.message.chat.id
             chat_type = message_obj.message.chat.type
             message_to_reply = message_obj.message
         else:  # Это обычное сообщение (types.Message)
             chat_id = message_obj.from_user.id
+            chat_id2 = message_obj.message.chat.id
             chat_type = message_obj.chat.type
             message_to_reply = message_obj
 
@@ -389,7 +393,7 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
         
         # Отправляем сообщение с клавиатурой
         await bot.send_message(
-            chat_id=chat_id,
+            chat_id=chat_id2,
             text=response,
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
