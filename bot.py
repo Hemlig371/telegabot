@@ -757,7 +757,7 @@ async def show_executor_tasks(message_obj, executor):
         for task_id, task_text, current_executor in tasks:
             keyboard.add(InlineKeyboardButton(
                 f"{task_text[:30]}... (ID: {task_id})", 
-                callback_data=f"executor_task_{task_id}"
+                callback_data=f"executor_task|{task_id}"
             ))
 
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="executor_manual_id"))
@@ -769,10 +769,10 @@ async def show_executor_tasks(message_obj, executor):
     except Exception as e:
         logger.error(f"Ошибка при получении задач: {e}")
 
-@dp.callback_query_handler(lambda c: c.data.startswith("executor_task_"), state=ExecutorUpdate.waiting_for_task_selection)
+@dp.callback_query_handler(lambda c: c.data.startswith("executor_task|"), state=ExecutorUpdate.waiting_for_task_selection)
 async def process_selected_task_executor(callback_query: types.CallbackQuery, state: FSMContext):
     """Обработка выбранной задачи"""
-    task_id = callback_query.data.split("_")[2]
+    task_id = callback_query.data.split("|")[-1]
     await state.update_data(task_id=task_id)
     
     # Получаем список исполнителей для inline-клавиатуры
@@ -1167,7 +1167,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
         for task in tasks:
             task_id, task_user, task_text, status, deadline = task
             result.append(
-                f"🔹: {task_id} 📝: {task_text}"
+                f"🔹: {task_id} 📝: {task_text}\n"
                 f"🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
                 f"──────────"
             )
