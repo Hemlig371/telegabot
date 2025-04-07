@@ -1467,10 +1467,6 @@ async def delete_task_start(message: types.Message):
         """)
         tasks = cursor.fetchall()
 
-        if not tasks:
-            await bot.send_message(chat_id=message.from_user.id, text="📭 У вас нет задач для удаления.")
-            return
-
         keyboard = InlineKeyboardMarkup(row_width=1)
         for task_id, task_text, status in tasks:
             keyboard.add(InlineKeyboardButton(
