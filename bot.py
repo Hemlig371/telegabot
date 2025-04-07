@@ -955,79 +955,97 @@ async def list_tasks(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
-    """Просмотр списка задач с пагинацией"""
+    """Просмотр списка задач с выбором исполнителя и пагинацией"""
     try:
-        user_id = message.from_user.id
-        current_page[user_id] = 0  # Сбрасываем на первую страницу при новом запросе
-        
-        # Отправляем первое сообщение
-        sent_message = await show_tasks_page(message, user_id, page=0)
-        
-        # Сохраняем ID сообщения для последующего редактирования
-        current_page[f"{user_id}_message_id"] = sent_message.message_id
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT user_id FROM tasks 
+            WHERE status NOT IN ('удалено')
+            LIMIT 20
+        """)
+        executors = cursor.fetchall()
+        if not executors:
+            await message.reply("❌ Нет задач для отображения")
+            return
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        for executor in executors:
+            keyboard.add(InlineKeyboardButton(
+                f"👤 {executor[0] if executor[0] else 'Без исполнителя'}",
+                callback_data=f"listtasks_executor|{executor[0]}"
+            ))
+        await message.reply("Выберите исполнителя для фильтрации задач:", reply_markup=keyboard)
     except Exception as e:
         logger.error(f"Ошибка при получении списка задач: {str(e)}")
         await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при получении списка задач.")
 
-async def show_tasks_page(message: types.Message, user_id: int, page: int):
-    """Показать страницу с задачами и вернуть отправленное сообщение"""
+@dp.callback_query_handler(lambda c: c.data.startswith("listtasks_executor|"))
+async def process_listtasks_executor(callback_query: types.CallbackQuery):
+    executor = callback_query.data.split("|")[1]
+    user_id = callback_query.from_user.id
+    current_page[user_id] = 0  # Сбрасываем страницу
+    sent_message = await show_tasks_page(callback_query.message, user_id, page=0, executor_filter=executor)
+    current_page[f"{user_id}_message_id"] = sent_message.message_id
+    await bot.answer_callback_query(callback_query.id)
+
+
+async def show_tasks_page(message: types.Message, user_id: int, page: int, executor_filter: str = None):
     try:
         cursor = conn.cursor()
-        # Получаем общее количество задач
-        cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено')")  
+        # Если указан фильтр по исполнителю, добавляем условие
+        cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND user_id = ?", (executor_filter,))
         total_tasks = cursor.fetchone()[0]
         
         if total_tasks == 0:
-            return await bot.send_message(message.from_user.id, "📭 У вас нет активных задач.")
+            return await bot.send_message(message.from_user.id, "📭 Нет активных задач.")
         
-        # Вычисляем общее количество страниц
-        total_pages = (total_tasks - 1) // 5
+        total_pages = (total_tasks - 1) // 10
+        page = max(0, min(page, total_pages))
         
-        # Проверяем, что запрашиваемая страница существует
-        if page < 0:
-            page = 0
-        elif page > total_pages:
-            page = total_pages
-        
-        # Получаем задачи для текущей страницы
-        cursor.execute("""
-            SELECT id, user_id, task_text, status, deadline 
-            FROM tasks 
-            WHERE status NOT IN ('удалено','исполнено')
-            ORDER BY id DESC 
-            LIMIT 5 OFFSET ?
-        """, (page * 5,))
+        if executor_filter:
+            cursor.execute("""
+                SELECT id, user_id, task_text, status, deadline 
+                FROM tasks 
+                WHERE status NOT IN ('удалено','исполнено') AND user_id = ?
+                ORDER BY id DESC 
+                LIMIT 10 OFFSET ?
+            """, (executor_filter, page * 10))
+        else:
+            cursor.execute("""
+                SELECT id, user_id, task_text, status, deadline 
+                FROM tasks 
+                WHERE status NOT IN ('удалено','исполнено')
+                ORDER BY id DESC 
+                LIMIT 10 OFFSET ?
+            """, (page * 10,))
         tasks = cursor.fetchall()
 
-        # Формируем сообщение
         result = []
         for task in tasks:
-            task_id, user_id, task_text, status, deadline = task
+            task_id, task_user, task_text, status, deadline = task
             result.append(
-                f"🔹 ID: {task_id} 👤: {user_id}\n"
+                f"🔹 ID: {task_id} 👤: {task_user}\n"
                 f"📝: {task_text}\n"
                 f"🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
                 f"──────────"
             )
-
-        # Создаем клавиатуру пагинации
         keyboard = InlineKeyboardMarkup(row_width=3)
         buttons = []
         if page > 0:
             buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"tasks_prev_{page-1}"))
-        
         buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages+1}", callback_data="tasks_page"))
-        
         if page < total_pages:
             buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=f"tasks_next_{page+1}"))
-        
         keyboard.row(*buttons)
         
-        # Всегда отправляем новое сообщение
+        header = f"📋 Список задач (страница {page+1} из {total_pages+1})"
+        if executor_filter:
+            header = f"📋 Задачи для <b>{executor_filter}</b> (страница {page+1} из {total_pages+1})"
+        
         sent_message = await bot.send_message(
             chat_id=message.chat.id,
-            text=f"📋 Список задач (страница {page+1} из {total_pages+1}):\n\n" + "\n".join(result),
-            reply_markup=keyboard
+            text=header + ":\n\n" + "\n".join(result),
+            reply_markup=keyboard,
+            parse_mode=ParseMode.HTML
         )
         return sent_message
         
