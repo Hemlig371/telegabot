@@ -837,7 +837,7 @@ async def process_new_executor(message: types.Message, state: FSMContext):
         reply_markup = menu_keyboard if chat_type == "private" else group_menu_keyboard
         
         # Отправляем сообщение с клавиатурой
-        await bot.send_message(chat_id=message.from_user.id,text=f"✅ Исполнитель задачи {task_id} изменен на '{new_executor}'"),
+        await bot.send_message(chat_id=message.from_user.id,text=f"✅ Исполнитель задачи {task_id} изменен на '{new_executor}'",
             reply_markup=reply_markup
         )
         
