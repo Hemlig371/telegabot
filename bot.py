@@ -520,7 +520,7 @@ async def status_select_task(message: types.Message):
         row_buttons = [
             InlineKeyboardButton(
                 f"👤 {executor[0]}",
-                callback_data=f"executor_for_status_{executor[0]}"
+                callback_data=f"executor_for_status|{executor[0]}"
             ) for executor in row
         ]
         keyboard.add(*row_buttons)  # Добавляем группу кнопок в клавиатуру
@@ -531,9 +531,9 @@ async def status_select_task(message: types.Message):
     await message.reply("Выберите исполнителя для фильтрации задач:", reply_markup=keyboard)
     await StatusUpdate.waiting_for_executor.set()
 
-@dp.callback_query_handler(lambda c: c.data.startswith("executor_for_status_"), state=StatusUpdate.waiting_for_executor)
+@dp.callback_query_handler(lambda c: c.data.startswith("executor_for_status|"), state=StatusUpdate.waiting_for_executor)
 async def process_executor_selection(callback_query: types.CallbackQuery, state: FSMContext):
-    executor = callback_query.data.split("_")[-1]
+    executor = callback_query.data.split("|")[-1]
     await state.update_data(executor=executor)
     await show_filtered_tasks(callback_query.message, executor)
     await StatusUpdate.waiting_for_task_selection.set()
