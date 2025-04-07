@@ -993,7 +993,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
         cursor = conn.cursor()
         # Если указан фильтр по исполнителю, добавляем условие
         if executor_filter.lower() == "none":
-            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND user_id IS NULL", (executor_filter,))
+            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND user_id IS NULL")
         else:
             cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND user_id = ?", (executor_filter,))
         total_tasks = cursor.fetchone()[0]
