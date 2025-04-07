@@ -167,7 +167,7 @@ async def set_bot_commands(bot: Bot):
 
 @dp.message_handler(commands=["start"])
 async def start_command(message: types.Message):
-    if message.from_user.id not in ALLOWED_USERS:
+    if message.from_user.id not in ALLOWED_USERS or != ADMIN_ID:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
 
@@ -1287,14 +1287,14 @@ async def cancel_task_deletion(callback_query: types.CallbackQuery):
 # ======================
 
 @dp.message_handler(commands=["adduser"])
-async def add_user_command(update, context):
-    if message.from_user.id != ADMIN_ID:
-        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только администратор может добавлять пользователей")
+async def add_user_command(update: types.Message, context):
+    if update.from_user.id != ADMIN_ID:
+        await bot.send_message(chat_id=update.from_user.id, text="⛔ Только администратор может добавлять пользователей")
         return
 
     conn = context.bot_data['db_connection']
-    user_id = str(update.effective_user.id)
-    
+    user_id = str(update.from_user.id)
+
     try:
         conn.execute('INSERT INTO users (tg_user_id) VALUES (?)', (user_id,))
         conn.commit()
@@ -1303,15 +1303,15 @@ async def add_user_command(update, context):
     except sqlite3.Error as e:
         await update.message.reply_text("❌ Произошла ошибка при добавлении в базу данных")
 
-    """Экспорт всех задач в CSV файл с кодировкой win1251"""
+    """Экспорт всех пользователей в CSV файл с кодировкой win1251"""
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users")
-        tasks = cursor.fetchall()
+        cursor.execute("SELECT tg_user_id FROM users")
+        users = cursor.fetchall()
 
         # Создаем CSV в памяти
         output = io.BytesIO()
-        
+
         # Используем TextIOWrapper с нужной кодировкой
         text_buffer = io.TextIOWrapper(
             output,
@@ -1319,41 +1319,40 @@ async def add_user_command(update, context):
             errors='replace',  # заменяем некодируемые символы
             newline=''
         )
-        
+
         writer = csv.writer(
             text_buffer,
             delimiter=';',  # Указываем нужный разделитель
             quoting=csv.QUOTE_MINIMAL
         )
-        
+
         # Заголовки столбцов
         headers = ['tg_user ID']
         writer.writerow(headers)
-        
+
         # Данные
-        for task in tasks:
+        for user in users:
             # Преобразуем все значения в строки
             row = [
-                str(item) if item is not None else ''
-                for item in task
+                str(user[0]) if user[0] is not None else ''  # Пользователь tg_user_id
             ]
             writer.writerow(row)
-        
+
         # Важно: закрыть TextIOWrapper перед использованием буфера
         text_buffer.flush()
         text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
         output.seek(0)
-        
+
         # Создаем временный файл
         csv_file = InputFile(output, filename="users_export.csv")
-        
-        await message.reply_document(
+
+        await update.message.reply_document(
             document=csv_file
         )
- 
+
     except Exception as e:
-        logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+        logger.error(f"Ошибка при экспорте пользователей: {str(e)}", exc_info=True)
+        await bot.send_message(chat_id=update.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
 # ID Пользователя
