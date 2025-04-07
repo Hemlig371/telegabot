@@ -295,8 +295,8 @@ async def process_title(message: types.Message, state: FSMContext):
         keyboard.row(*executor_buttons)
     
     await bot.send_message(
-        chat_id=message.from_user.id,
-        text="👤 Выберите исполнителя из списка или введите @username вручную:",
+        chat_id=message.chat.id,
+        text="👤 Выберите исполнителя или введите @username вручную:",
         reply_markup=keyboard
     )
     await TaskCreation.waiting_for_executor.set()
@@ -359,7 +359,7 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
     try:
         # Получаем chat_id и тип чата
         if isinstance(message_obj, types.CallbackQuery):
-            chat_id = message_obj.from_user.id
+            chat_id = message_obj.chat.id
             chat_type = message_obj.message.chat.type
             message_to_reply = message_obj.message
         else:  # Это обычное сообщение (types.Message)
