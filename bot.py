@@ -1506,6 +1506,7 @@ async def process_manual_task_id_delete(message: types.Message, state: FSMContex
         
         await state.update_data(task_id=task_id)
         await show_delete_confirmation(message, task_id)
+        await TaskDeletion.waiting_for_confirmation.set()
     except ValueError:
         await bot.send_message(chat_id=message.from_user.id, text="⚠ Пожалуйста, введите числовой ID задачи!")
         await state.finish()
@@ -1548,8 +1549,9 @@ async def show_delete_confirmation(message_obj, task_id):
         reply_markup=keyboard
     )
 
-@dp.callback_query_handler(lambda c: c.data.startswith("confirm_deletion_"))
-async def execute_task_deletion(callback_query: types.CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data.startswith("confirm_deletion_"), 
+                          state=TaskDeletion.waiting_for_confirmation)
+async def execute_task_deletion(callback_query: types.CallbackQuery, state: FSMContext):
     """Выполнение удаления задачи"""
     try:
         task_id = callback_query.data.split("_")[2]
@@ -1573,6 +1575,7 @@ async def execute_task_deletion(callback_query: types.CallbackQuery):
             f"ID: {task_id}\n"
             f"Текст: {task_text[:100]}..."
         )
+        await state.finish()
     except Exception as e:
         logger.error(f"Ошибка при удалении задачи: {e}")
         await bot.send_message(chat_id=callback_query.from_user.id, text="⚠ Ошибка при удалении задачи!")
@@ -1582,6 +1585,7 @@ async def cancel_task_deletion(callback_query: types.CallbackQuery):
     """Отмена удаления задачи"""
     await bot.answer_callback_query(callback_query.id)
     await callback_query.message.edit_text("❌ Удаление отменено.")
+    await state.finish()
 
 # ======================
 # Добавление пользователя
