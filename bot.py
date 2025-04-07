@@ -248,13 +248,6 @@ async def cmd_export_tasks(message: types.Message):
         return  
     await export_tasks_to_csv2(message)  # Аналогично кнопке "📤 Экспорт (с исполненными)"
 
-@dp.message_handler(commands=["deletetask"])
-async def cmd_delete_task(message: types.Message):
-    if message.from_user.id not in ALLOWED_USERS:
-        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
-        return  
-    await delete_task_start(message)  # Аналогично кнопке "🗑 Удалить задачу"
-
 # ======================
 # СОСТОЯНИЯ БОТА
 # ======================
@@ -1300,7 +1293,7 @@ async def add_user_command(update: types.Message):
     
     # Переводим в состояние ожидания ID пользователя
     await AddUserState.waiting_for_user_id.set()
-    await update.message.reply_text("⏳ Введите ID пользователя для добавления в список разрешенных:")
+    await bot.send_message(chat_id=message.from_user.id, text="⏳ Введите ID пользователя для добавления в список разрешенных:")
 
 @dp.message_handler(state=AddUserState.waiting_for_user_id)
 async def process_user_id(message: types.Message, state: FSMContext):
