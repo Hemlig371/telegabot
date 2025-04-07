@@ -1286,7 +1286,7 @@ class AddUserState(StatesGroup):
     waiting_for_user_id = State()  # Ожидаем ID пользователя
 
 @dp.message_handler(commands=["adduser"])
-async def add_user_command(update: types.Message):
+async def add_user_command(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Только администратор может добавлять пользователей")
         return
