@@ -512,7 +512,7 @@ async def status_select_task(message: types.Message):
         return
 
     # Создаем клавиатуру с исполнителями
-    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard = InlineKeyboardMarkup(row_width=3)
     for executor, in executors:
         keyboard.add(InlineKeyboardButton(
             f"👤 {executor}",
@@ -538,10 +538,10 @@ async def show_filtered_tasks(message_obj, executor):
         cursor.execute("""
             SELECT id, task_text, status 
             FROM tasks
-            WHERE chat_id=? AND user_id=? AND status<>'удалено'
+            WHERE user_id=? AND status<>'удалено'
             ORDER BY id DESC 
             LIMIT 5
-        """, (message_obj.from_user.id, executor))
+        """, (executor,))
         
         tasks = cursor.fetchall()
 
