@@ -545,7 +545,7 @@ async def show_filtered_tasks(message_obj, executor):
         cursor.execute("""
             SELECT id, task_text, status 
             FROM tasks
-            WHERE user_id=? AND status<>'удалено'
+            WHERE CASE WHEN user_id='None' then null else user_id end =? AND status<>'удалено'
             ORDER BY id DESC 
             LIMIT 20
         """, (executor,))
