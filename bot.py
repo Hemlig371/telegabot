@@ -61,15 +61,12 @@ def init_db():
                         chat_id INTEGER,
                         task_text TEXT,
                         status TEXT DEFAULT 'новая',
-                        deadline TEXT);
-                        
-                        CREATE TABLE IF NOT EXISTS users (
-                        tg_user_id TEXT PRIMARY KEY);
+                        deadline TEXT)
                         ''')
         conn.commit()
 
         cursor.execute('''CREATE TABLE IF NOT EXISTS users (
-                        tg_user_id TEXT PRIMARY KEY);
+                        tg_user_id TEXT PRIMARY KEY)
                         ''')
         conn.commit()
       
