@@ -105,16 +105,16 @@ def get_deadline_keyboard(with_none_option=False):
     for label, date in dates.items():
         buttons.append(InlineKeyboardButton(label, callback_data=f"set_deadline_{date}"))
     
-    # Распределяем кнопки по 2 в ряд
-    for i in range(0, len(buttons), 2):
-        row = buttons[i:i+2]
-        keyboard.row(*row)
-    
     # Дополнительные кнопки
     if with_none_option:
         keyboard.add(InlineKeyboardButton("❌ Без срока", callback_data="set_deadline_none"))
     
     keyboard.add(InlineKeyboardButton("Свой срок", callback_data="set_deadline_custom"))
+
+    # Распределяем кнопки по 2 в ряд
+    for i in range(0, len(buttons), 2):
+        row = buttons[i:i+2]
+        keyboard.row(*row)
     
     return keyboard
 
