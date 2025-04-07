@@ -960,7 +960,7 @@ async def list_tasks(message: types.Message):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT DISTINCT user_id FROM tasks 
-            WHERE status NOT IN ('удалено')
+            WHERE status NOT IN ('удалено', 'исполнено')
             LIMIT 20
         """)
         executors = cursor.fetchall()
@@ -996,19 +996,29 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
         total_tasks = cursor.fetchone()[0]
         
         if total_tasks == 0:
-            return await bot.send_message(message.from_user.id, "📭 Нет активных задач.")
+            return await bot.send_message(message.chat.id, "📭 Нет активных задач.")
         
         total_pages = (total_tasks - 1) // 10
         page = max(0, min(page, total_pages))
         
+        # Получаем задачи с учетом фильтра
         if executor_filter:
-            cursor.execute("""
-                SELECT id, user_id, task_text, status, deadline 
-                FROM tasks 
-                WHERE status NOT IN ('удалено','исполнено') AND user_id = ?
-                ORDER BY id DESC 
-                LIMIT 10 OFFSET ?
-            """, (executor_filter, page * 10))
+            if executor_filter.lower() == "none":
+                cursor.execute("""
+                    SELECT id, user_id, task_text, status, deadline 
+                    FROM tasks 
+                    WHERE status NOT IN ('удалено','исполнено') AND user_id IS NULL
+                    ORDER BY id DESC 
+                    LIMIT 10 OFFSET ?
+                """, (page * 10,))
+            else:
+                cursor.execute("""
+                    SELECT id, user_id, task_text, status, deadline 
+                    FROM tasks 
+                    WHERE status NOT IN ('удалено','исполнено') AND user_id = ?
+                    ORDER BY id DESC 
+                    LIMIT 10 OFFSET ?
+                """, (executor_filter, page * 10))
         else:
             cursor.execute("""
                 SELECT id, user_id, task_text, status, deadline 
