@@ -604,7 +604,7 @@ async def show_filtered_tasks(message_obj, executor):
         
         await bot.send_message(
             chat_id=message_obj.chat.id,
-            text=f"Задачи исполнителя {executor if executor else 'Без исполнителя'}:",
+            text=f"Задачи исполнителя {'Без исполнителя' if executor is None or str(executor).lower() == 'none' else executor}:",
             reply_markup=keyboard
         )
         
@@ -755,7 +755,7 @@ async def show_executor_tasks(message_obj, executor):
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="executor_manual_id"))
         await bot.send_message(
             chat_id=message_obj.chat.id,
-            text=f"Задачи исполнителя {executor if executor else 'Без исполнителя'}:",
+            text=f"Задачи исполнителя {'Без исполнителя' if executor is None or str(executor).lower() == 'none' else executor}:",
             reply_markup=keyboard
         )
     except Exception as e:
@@ -974,7 +974,7 @@ async def show_deadline_tasks(message_obj, executor):
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="deadline_manual_id"))
         await bot.send_message(
             chat_id=message_obj.chat.id,
-            text=f"Задачи исполнителя {executor if executor else 'Без исполнителя'}:",
+            text=f"Задачи исполнителя {'Без исполнителя' if executor is None or str(executor).lower() == 'none' else executor}:",
             reply_markup=keyboard
         )
     except Exception as e:
@@ -1163,7 +1163,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
         for task in tasks:
             task_id, task_user, task_text, status, deadline = task
             result.append(
-                f"🔹: {task_id} 📝: {task_text}\n"
+                f"🔹: {task_id} 📝: {task_text}\n\n"
                 f"🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
                 f"──────────"
             )
