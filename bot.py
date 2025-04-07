@@ -1304,12 +1304,12 @@ async def process_user_id(message: types.Message, state: FSMContext):
         return
 
     # Получаем подключение к базе данных из контекста
-    conn = message.bot.get('db_connection')  # Здесь предполагается, что подключение к БД хранится в контексте
-    user_id = str(user_id)
+    cursor = conn.cursor()
+    user_id = int(user_id)
 
     try:
         # Вставляем в базу данных
-        conn.execute('INSERT INTO users (tg_user_id) VALUES (?)', (user_id,))
+        cursor.execute('INSERT INTO users (tg_user_id) VALUES (?)', (user_id,))
         conn.commit()
         
         # Обновляем список разрешенных пользователей
