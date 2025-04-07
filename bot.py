@@ -98,8 +98,8 @@ menu_keyboard.add(
 # Клавиатура для групповых чатов
 group_menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 group_menu_keyboard.add(
-    KeyboardButton("➕ Новая задача"),
     KeyboardButton("⚡ Быстрая задача"),
+    KeyboardButton("➕ Новая задача"),
     KeyboardButton("📤 Экспорт задач")
 )
 
