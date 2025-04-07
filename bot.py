@@ -99,7 +99,6 @@ group_menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 group_menu_keyboard.add(
     KeyboardButton("➕ Новая задача"),
     KeyboardButton("⚡ Быстрая задача"),
-    KeyboardButton("📋 Список задач"),
     KeyboardButton("📤 Экспорт задач")
 )
 
