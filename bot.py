@@ -264,10 +264,13 @@ async def new_task_start(message: types.Message, state: FSMContext):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
     
-    # Сохраняем chat_id (группы или ЛС) в состоянии
-    await state.update_data(chat_id=message.chat.id)
+    # Сохраняем исходный chat_id и user_id
+    await state.update_data(
+        original_chat_id=message.chat.id,
+        user_id=message.from_user.id
+    )
     
-    # Всегда работаем через ЛС для интерактивных сообщений
+    # Всегда продолжаем диалог в ЛС
     if message.chat.type != "private":
         await bot.send_message(
             chat_id=message.from_user.id,
@@ -287,27 +290,18 @@ async def process_title(message: types.Message, state: FSMContext):
     """Обработка названия задачи"""
     await state.update_data(title=message.text)
     
-    # Получаем список последних исполнителей из БД
+    # Получаем список исполнителей
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
     executors = cursor.fetchall()
     
-    # Создаем клавиатуру с вариантами
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    executor_buttons = []
-    
-    for executor in executors:
-        if executor[0]:
-            executor_buttons.append(types.KeyboardButton(executor[0]))
-            if len(executor_buttons) == 2:
-                keyboard.row(*executor_buttons)
-                executor_buttons = []
-    
-    if executor_buttons:
-        keyboard.row(*executor_buttons)
+    for i in range(0, len(executors), 2):
+        row = executors[i:i+2]
+        keyboard.row(*[types.KeyboardButton(e[0]) for e in row if e[0]])
     
     await bot.send_message(
-        chat_id=message.from_user.id,
+        chat_id=message.chat.id,
         text="👤 Выберите исполнителя или введите @username вручную:",
         reply_markup=keyboard
     )
@@ -320,10 +314,9 @@ async def process_executor(message: types.Message, state: FSMContext):
     executor = message.text.strip()
     await state.update_data(executor=executor)
     
-    # Убираем клавиатуру после выбора
-    remove_kb = types.ReplyKeyboardRemove()
+    # Отправляем клавиатуру с выбором срока
     await bot.send_message(
-        chat_id=message.from_user.id,
+        chat_id=message.chat.id,
         text="⏳ Выберите срок или введите свой:",
         reply_markup=get_deadline_keyboard(with_none_option=True)
     )
@@ -332,7 +325,9 @@ async def process_executor(message: types.Message, state: FSMContext):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("set_deadline_"), state=TaskCreation.waiting_for_deadline)
 async def process_deadline(callback_query: types.CallbackQuery, state: FSMContext):
-    """Обработка выбора дедлайна"""
+    """Обработка выбора дедлайна из ЛС"""
+    user_data = await state.get_data()
+    
     if callback_query.data == "set_deadline_custom":
         await bot.send_message(
             chat_id=callback_query.from_user.id,
@@ -346,13 +341,13 @@ async def process_deadline(callback_query: types.CallbackQuery, state: FSMContex
 
 @dp.message_handler(state=TaskCreation.waiting_for_deadline)
 async def process_custom_deadline(message: types.Message, state: FSMContext):
-    """Обработка ввода собственного срока"""
+    """Обработка ручного ввода срока"""
     try:
         datetime.strptime(message.text, "%Y-%m-%d")
         await save_task(message, state, message.text.strip())
     except ValueError:
         await bot.send_message(
-            chat_id=message.from_user.id,
+            chat_id=message.chat.id,
             text="⚠ Ошибка! Введите дату в формате YYYY-MM-DD."
         )
         await state.finish()
@@ -362,13 +357,14 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
     user_data = await state.get_data()
     task_text = user_data['title']
     executor = user_data['executor']
-    chat_id = user_data['chat_id']  # Используем сохраненный chat_id
+    original_chat_id = user_data['original_chat_id']
+    user_id = user_data['user_id']
 
     try:
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO tasks (user_id, chat_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-            (executor, chat_id, task_text, deadline)
+            (executor, original_chat_id, task_text, deadline)
         )
         conn.commit()
 
@@ -378,21 +374,16 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
             f"⏳ {deadline if deadline else 'Без срока'}"
         )
         
-        # Отправляем подтверждение
+        # Отправляем уведомление в исходный чат
         await bot.send_message(
-            chat_id=chat_id,
-            text=f"✅ Задача создана:\n{response}",
+            chat_id=original_chat_id,
+            text=f"✅ Новая задача:\n{response}",
             parse_mode=ParseMode.HTML,
-            reply_markup=menu_keyboard if chat_id == message_obj.from_user.id else group_menu_keyboard
+            reply_markup=group_menu_keyboard if original_chat_id != user_id else menu_keyboard
         )
         
-        # Если задача создана в группе, дублируем в ЛС
-        if isinstance(message_obj, types.CallbackQuery):
-            user_id = message_obj.from_user.id
-        else:
-            user_id = message_obj.from_user.id
-            
-        if chat_id != user_id:
+        # Дублируем в ЛС пользователя
+        if original_chat_id != user_id:
             await bot.send_message(
                 chat_id=user_id,
                 text=f"✅ Задача создана в чате:\n{response}",
@@ -403,7 +394,7 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
     except sqlite3.Error as e:
         logger.error(f"Ошибка БД при сохранении задачи: {e}")
         await bot.send_message(
-            chat_id=message_obj.from_user.id,
+            chat_id=user_id,
             text=f"⚠ Ошибка при сохранении задачи: {str(e)}"
         )
     finally:
