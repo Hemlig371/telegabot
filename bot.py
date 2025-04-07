@@ -519,8 +519,8 @@ async def status_select_task(message: types.Message):
         row = executors[i:i+2]  # Берем группу из 2 элементов
         row_buttons = [
             InlineKeyboardButton(
-                f"👤 {executor}",
-                callback_data=f"executor_for_status|{executor}"
+                f"👤 {executor[0]}",
+                callback_data=f"executor_for_status|{executor[0]}"
             ) for executor in row
         ]
         keyboard.add(*row_buttons)  # Добавляем группу кнопок в клавиатуру
