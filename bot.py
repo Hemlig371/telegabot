@@ -294,11 +294,19 @@ async def process_title(message: types.Message, state: FSMContext):
     if executor_buttons:
         keyboard.row(*executor_buttons)
     
-    await bot.send_message(
+    sent_msg = await bot.send_message(
         chat_id=message.chat.id,
         text="👤 Выберите исполнителя или введите @username вручную:",
         reply_markup=keyboard
     )
+    
+    # Удалить через N секунд только в групповых чатах
+    if message.chat.type != "private":  # Проверяем, что это не личный чат
+        await asyncio.sleep(5)
+        try:
+            await bot.delete_message(chat_id=sent_msg.chat.id, message_id=sent_msg.message_id)
+        except Exception as e:
+            logger.error(f"Ошибка при удалении сообщения: {e}")
     await TaskCreation.waiting_for_executor.set()
 
 @dp.message_handler(state=TaskCreation.waiting_for_executor)
@@ -309,11 +317,19 @@ async def process_executor(message: types.Message, state: FSMContext):
     
     # Убираем клавиатуру после выбора
     remove_kb = types.ReplyKeyboardRemove()
-    await bot.send_message(
+    sent_msg = await bot.send_message(
         chat_id=message.chat.id,
         text="⏳ Выберите срок или введите свой:",
         reply_markup=get_deadline_keyboard(with_none_option=True)
     )
+    
+    # Удалить через N секунд только в групповых чатах
+    if message.chat.type != "private":  # Проверяем, что это не личный чат
+        await asyncio.sleep(15)
+        try:
+            await bot.delete_message(chat_id=sent_msg.chat.id, message_id=sent_msg.message_id)
+        except Exception as e:
+            logger.error(f"Ошибка при удалении сообщения: {e}")
     await TaskCreation.waiting_for_deadline.set()
 
 @dp.callback_query_handler(lambda c: c.data.startswith("set_deadline_"), state=TaskCreation.waiting_for_deadline)
@@ -359,7 +375,7 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
     try:
         # Получаем chat_id и тип чата
         if isinstance(message_obj, types.CallbackQuery):
-            chat_id = message_obj.chat.id
+            chat_id = message_obj.message.chat.id
             chat_type = message_obj.message.chat.type
             message_to_reply = message_obj.message
         else:  # Это обычное сообщение (types.Message)
@@ -387,12 +403,20 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
         reply_markup = menu_keyboard if chat_type == "private" else group_menu_keyboard
         
         # Отправляем сообщение с клавиатурой
-        await bot.send_message(
+        sent_msg = await bot.send_message(
             chat_id=chat_id,
             text=response,
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
+        
+        # Удалить через N секунд только в групповых чатах
+        if message.chat.type != "private":  # Проверяем, что это не личный чат
+            await asyncio.sleep(5)
+            try:
+                await bot.delete_message(chat_id=sent_msg.chat.id, message_id=sent_msg.message_id)
+            except Exception as e:
+                logger.error(f"Ошибка при удалении сообщения: {e}")
   
     except sqlite3.Error as e:
         logger.error(f"Ошибка БД при сохранении задачи: {e}")
