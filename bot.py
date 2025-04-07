@@ -715,7 +715,8 @@ async def show_executor_tasks(message_obj, executor):
                 f"{task_text[:30]}... (ID: {task_id})", 
                 callback_data=f"executor_task_{task_id}"
             ))
-        
+
+        keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="executor_manual_id"))
         await bot.send_message(
             chat_id=message_obj.chat.id,
             text=f"Задачи исполнителя {executor}:",
@@ -847,7 +848,8 @@ async def show_deadline_tasks(message_obj, executor):
                 f"{task_text[:30]}... (ID: {task_id})", 
                 callback_data=f"deadline_task_{task_id}"
             ))
-        
+
+        keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="deadline_manual_id"))
         await bot.send_message(
             chat_id=message_obj.chat.id,
             text=f"Задачи исполнителя {executor}:",
