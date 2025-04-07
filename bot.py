@@ -893,6 +893,7 @@ async def process_manual_task_id(message: types.Message, state: FSMContext):
         await TaskUpdate.waiting_for_deadline_choice.set()
     except ValueError:
         await bot.send_message(chat_id=message.from_user.id, text="⚠ Введите числовой ID задачи!")
+        await state.finish()
 
 async def show_deadline_options(message_obj):
     """Показать варианты выбора срока"""
