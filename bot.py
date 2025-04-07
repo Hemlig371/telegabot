@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from datetime import datetime, timedelta
+from typing import List
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import (ParseMode, BotCommand, ReplyKeyboardMarkup, 
@@ -33,10 +34,16 @@ API_TOKEN = os.getenv('apibotkey')
 DB_PATH = "/bd1/tasks.db"
 
 # Список разрешенных пользователей
-ALLOWED_USERS = [719910511, 997412998, 1097397831, 771104718, 375577548, 837149325, 737740550, 353634381, 765070966]  
+ALLOWED_USERS: List[str] = []  
+
+def update_allowed_users(conn):
+    global ALLOWED_USERS
+    cursor = conn.cursor()
+    cursor.execute('SELECT tg_user_id FROM users')
+    ALLOWED_USERS = [row[0] for row in cursor.fetchall()]
 
 # ID администратора (может удалять задачи)
-ADMIN_ID = 719910511  
+ADMIN_ID = os.getenv('admin')
 
 # Инициализация бота и диспетчера
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
@@ -54,7 +61,11 @@ def init_db():
                         chat_id INTEGER,
                         task_text TEXT,
                         status TEXT DEFAULT 'новая',
-                        deadline TEXT)''')
+                        deadline TEXT);
+                        
+                        CREATE TABLE IF NOT EXISTS users (
+                        tg_user_id TEXT PRIMARY KEY);
+                        ''')
         conn.commit()
         return conn
     except sqlite3.Error as e:
@@ -146,7 +157,8 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="/start", description="Старт бота"),
         BotCommand(command="/myid", description="Узнать свой ID"),
         BotCommand(command="/export3", description="Полный экспорт (админ)"),
-        BotCommand(command="/deletetask", description="Удалить задачу (админ)")
+        BotCommand(command="/deletetask", description="Удалить задачу (админ)"),
+        BotCommand(command="/adduser", description="Добавить пользователя (админ)")
     ]
     await bot.set_my_commands(commands)
 
@@ -546,7 +558,7 @@ async def process_manual_task_id_status(message: types.Message, state: FSMContex
 
 async def show_status_options(message_obj, task_id):
     """Показать варианты статусов"""
-    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard = InlineKeyboardMarkup(row_width=3)
     statuses = ["новая", "в работе", "ожидает доклада", "исполнено", "удалено"]
     buttons = [InlineKeyboardButton(
         status, 
@@ -1266,6 +1278,75 @@ async def cancel_task_deletion(callback_query: types.CallbackQuery):
     """Отмена удаления задачи"""
     await bot.answer_callback_query(callback_query.id)
     await callback_query.message.edit_text("❌ Удаление отменено.")
+
+# ======================
+# Добавление пользователя
+# ======================
+
+@dp.message_handler(commands=["adduser"])
+async def add_user_command(update, context):
+    if message.from_user.id != ADMIN_ID:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только администратор может добавлять пользователей")
+        return
+
+    conn = context.bot_data['db_connection']
+    user_id = str(update.effective_user.id)
+    
+    try:
+        conn.execute('INSERT INTO users (tg_user_id) VALUES (?)', (user_id,))
+        conn.commit()
+        update_allowed_users(conn)
+        await update.message.reply_text("✅ Вы успешно добавлены в список разрешенных пользователей!")
+    except sqlite3.Error as e:
+        await update.message.reply_text("❌ Произошла ошибка при добавлении в базу данных")
+
+    """Экспорт всех задач в CSV файл с кодировкой win1251"""
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users")
+        tasks = cursor.fetchall()
+
+        # Создаем CSV в памяти
+        output = io.BytesIO()
+        
+        # Используем TextIOWrapper с нужной кодировкой
+        text_buffer = io.TextIOWrapper(
+            output,
+            encoding='utf-8-sig',
+            errors='replace',  # заменяем некодируемые символы
+            newline=''
+        )
+        
+        writer = csv.writer(
+            text_buffer,
+            delimiter=';',  # Указываем нужный разделитель
+            quoting=csv.QUOTE_MINIMAL
+        )
+        
+        # Заголовки столбцов
+        headers = ['tg_user ID']
+        writer.writerow(headers)
+        
+        # Данные
+        for task in tasks:
+            # Преобразуем все значения в строки
+            row = [
+                str(item) if item is not None else ''
+                for item in task
+            ]
+            writer.writerow(row)
+        
+        # Важно: закрыть TextIOWrapper перед использованием буфера
+        text_buffer.flush()
+        text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
+        output.seek(0)
+        
+        # Создаем временный файл
+        csv_file = InputFile(output, filename="users_export.csv")
+        
+        await message.reply_document(
+            document=csv_file
+        )
 
 # ======================
 # ID Пользователя
