@@ -1347,6 +1347,10 @@ async def add_user_command(update, context):
         await message.reply_document(
             document=csv_file
         )
+ 
+    except Exception as e:
+        logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
+        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
 # ID Пользователя
