@@ -365,11 +365,15 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
     executor = user_data['executor']
 
     try:
-        # Получаем chat_id в зависимости от типа message_obj
+        # Получаем chat_id и тип чата
         if isinstance(message_obj, types.CallbackQuery):
             chat_id = message_obj.from_user.id
+            chat_type = message_obj.message.chat.type
+            message_to_reply = message_obj.message
         else:  # Это обычное сообщение (types.Message)
             chat_id = message_obj.chat.id
+            chat_type = message_obj.chat.type
+            message_to_reply = message_obj
 
         cursor = conn.cursor()
         cursor.execute(
@@ -387,24 +391,15 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
         else:
             response += "⏳ Без срока"
             
-        # Отправляем ответ в зависимости от типа message_obj
-        if isinstance(message_obj, types.CallbackQuery):
-            await bot.send_message(chat_id=message_obj.from_user.id, text=response, parse_mode=ParseMode.HTML)
-        else:
-            await bot.send_message(chat_id=message_obj.from_user.id, text=response, parse_mode=ParseMode.HTML)
-
         # Определяем клавиатуру в зависимости от типа чата
-        if chat_type == "private":
-            keyboard = menu_keyboard
-        else:
-            keyboard = group_menu_keyboard
-            
-        # Отправляем ответ с соответствующей клавиатурой
+        reply_markup = menu_keyboard if chat_type == "private" else group_menu_keyboard
+        
+        # Отправляем сообщение с клавиатурой
         await bot.send_message(
             chat_id=chat_id,
             text=response,
             parse_mode=ParseMode.HTML,
-            reply_markup=keyboard
+            reply_markup=reply_markup
         )
   
     except sqlite3.Error as e:
