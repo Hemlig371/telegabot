@@ -793,6 +793,29 @@ async def process_manual_task_id_executor(message: types.Message, state: FSMCont
         
         await state.update_data(task_id=task_id)
         await bot.send_message(chat_id=message.from_user.id, text="✏️ Введите нового исполнителя (@username или user_id):")
+
+    # Создаем клавиатуру с вариантами
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    executor_buttons = []  # Временный список для кнопок
+    
+        for executor in executors:
+            if executor[0]:  # Пропускаем пустые значения
+                executor_buttons.append(types.KeyboardButton(executor[0]))
+                
+                # Добавляем по 2 кнопки в ряд
+                if len(executor_buttons) == 2:
+                    keyboard.row(*executor_buttons)
+                    executor_buttons = []
+        
+        # Добавляем оставшиеся кнопки, если их количество нечетное
+        if executor_buttons:
+            keyboard.row(*executor_buttons)
+        
+        await bot.send_message(
+            chat_id=message.from_user.id,
+            text="👤 Выберите исполнителя из списка или введите @username вручную:",
+            reply_markup=keyboard
+        )
         await ExecutorUpdate.waiting_for_new_executor.set()
     except ValueError:
         await bot.send_message(chat_id=message.from_user.id, text="⚠ Введите числовой ID задачи!")
@@ -804,12 +827,20 @@ async def process_new_executor(message: types.Message, state: FSMContext):
         new_executor = message.text.strip()
         user_data = await state.get_data()
         task_id = user_data['task_id']
-
+        chat_type = message_obj.chat.type 
+  
         cursor = conn.cursor()
         cursor.execute("UPDATE tasks SET user_id=? WHERE id=?", (new_executor, task_id))
         conn.commit()
 
-        await bot.send_message(chat_id=message.from_user.id,text=f"✅ Исполнитель задачи {task_id} изменен на '{new_executor}'")
+        # Определяем клавиатуру в зависимости от типа чата
+        reply_markup = menu_keyboard if chat_type == "private" else group_menu_keyboard
+        
+        # Отправляем сообщение с клавиатурой
+        await bot.send_message(chat_id=message.from_user.id,text=f"✅ Исполнитель задачи {task_id} изменен на '{new_executor}'"),
+            reply_markup=reply_markup
+        )
+        
         await state.finish()
         
     except Exception as e:
