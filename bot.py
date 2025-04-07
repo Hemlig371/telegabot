@@ -1508,6 +1508,7 @@ async def process_manual_task_id_delete(message: types.Message, state: FSMContex
         await show_delete_confirmation(message, task_id)
     except ValueError:
         await bot.send_message(chat_id=message.from_user.id, text="⚠ Пожалуйста, введите числовой ID задачи!")
+        await state.finish()
     except Exception as e:
         logger.error(f"Ошибка при обработке ручного ввода ID: {e}")
         await bot.send_message(chat_id=message.from_user.id, text="⚠ Произошла ошибка. Попробуйте снова.")
