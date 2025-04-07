@@ -519,7 +519,7 @@ async def status_select_task(message: types.Message):
         row = executors[i:i+2]  # Берем группу из 2 элементов
         row_buttons = [
             InlineKeyboardButton(
-                f"👤 {executor[0]}",
+                f"👤 {executor[0] if executor[0] else 'Без исполнителя'}",
                 callback_data=f"executor_for_status|{executor[0]}"
             ) for executor in row
         ]
@@ -542,7 +542,7 @@ async def show_filtered_tasks(message_obj, executor):
     """Показать задачи выбранного исполнителя"""
     try:
         cursor = conn.cursor()
-        if executor.lower() == "none":  # Проверяем, ищем ли задачи без исполнителя
+        if executor.lower() == "без исполнителя":  # Проверяем, ищем ли задачи без исполнителя
             cursor.execute("""
                 SELECT id, task_text, status 
                 FROM tasks
@@ -670,7 +670,7 @@ async def executor_select_task(message: types.Message):
         row = executors[i:i+2]
         row_buttons = [
             InlineKeyboardButton(
-                f"👤 {executor[0]}",
+                f"👤 {executor[0] if executor[0] else 'Без исполнителя'}",
                 callback_data=f"executor_filter|{executor[0]}"
             ) for executor in row
         ]
@@ -690,13 +690,22 @@ async def process_executor_filter(callback_query: types.CallbackQuery, state: FS
 async def show_executor_tasks(message_obj, executor):
     try:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, task_text, user_id 
-            FROM tasks 
-            WHERE user_id=? AND status<>'удалено'
-            ORDER BY id DESC 
-            LIMIT 20
-        """, (executor,))
+        if executor.lower() == "без исполнителя":  # Проверяем, ищем ли задачи без исполнителя
+            cursor.execute("""
+                SELECT id, task_text, status 
+                FROM tasks
+                WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено')
+                ORDER BY id DESC 
+                LIMIT 20
+            """)
+        else:
+            cursor.execute("""
+                SELECT id, task_text, status 
+                FROM tasks
+                WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено')
+                ORDER BY id DESC 
+                LIMIT 20
+            """, (executor,))
         
         tasks = cursor.fetchall()
 
@@ -793,7 +802,7 @@ async def deadline_select_task(message: types.Message):
         row = executors[i:i+2]
         row_buttons = [
             InlineKeyboardButton(
-                f"👤 {executor[0]}",
+                f"👤 {executor[0] if executor[0] else 'Без исполнителя'}",
                 callback_data=f"deadline_filter|{executor[0]}"
             ) for executor in row
         ]
@@ -813,13 +822,22 @@ async def process_deadline_filter(callback_query: types.CallbackQuery, state: FS
 async def show_deadline_tasks(message_obj, executor):
     try:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, task_text, deadline 
-            FROM tasks 
-            WHERE user_id=? AND status<>'удалено'
-            ORDER BY id DESC 
-            LIMIT 20
-        """, (executor,))
+        if executor.lower() == "без исполнителя":  # Проверяем, ищем ли задачи без исполнителя
+            cursor.execute("""
+                SELECT id, task_text, status 
+                FROM tasks
+                WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено')
+                ORDER BY id DESC 
+                LIMIT 20
+            """)
+        else:
+            cursor.execute("""
+                SELECT id, task_text, status 
+                FROM tasks
+                WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено')
+                ORDER BY id DESC 
+                LIMIT 20
+            """, (executor,))
         
         tasks = cursor.fetchall()
 
