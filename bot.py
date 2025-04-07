@@ -502,8 +502,8 @@ async def status_select_task(message: types.Message):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT DISTINCT user_id FROM tasks 
-        WHERE chat_id=? AND status<>'удалено'
-    """, (message.from_user.id,))
+        WHERE status<>'удалено'
+    """)
     
     executors = cursor.fetchall()
     
@@ -512,7 +512,7 @@ async def status_select_task(message: types.Message):
         return
 
     # Создаем клавиатуру с исполнителями
-    keyboard = InlineKeyboardMarkup(row_width=3)
+    keyboard = InlineKeyboardMarkup(row_width=2)
     for executor, in executors:
         keyboard.add(InlineKeyboardButton(
             f"👤 {executor}",
