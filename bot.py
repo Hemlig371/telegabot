@@ -526,7 +526,7 @@ async def status_select_task(message: types.Message):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("executor_for_status_"), state=StatusUpdate.waiting_for_executor)
 async def process_executor_selection(callback_query: types.CallbackQuery, state: FSMContext):
-    executor = callback_query.data.split("_")[-1]
+    executor = callback_query.data.split("")[-1]
     await state.update_data(executor=executor)
     await show_filtered_tasks(callback_query.message, executor)
     await StatusUpdate.waiting_for_task_selection.set()
@@ -540,7 +540,7 @@ async def show_filtered_tasks(message_obj, executor):
             FROM tasks
             WHERE user_id=? AND status<>'удалено'
             ORDER BY id DESC 
-            LIMIT 5
+            LIMIT 10
         """, (executor,))
         
         tasks = cursor.fetchall()
