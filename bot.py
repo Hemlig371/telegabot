@@ -792,36 +792,51 @@ async def process_manual_task_id_executor(message: types.Message, state: FSMCont
             return
         
         await state.update_data(task_id=task_id)
-        await bot.send_message(chat_id=message.from_user.id, text="✏️ Введите нового исполнителя (@username или user_id):")
+        
+        # Удаляем предыдущую клавиатуру
+        remove_kb = types.ReplyKeyboardRemove()
+        await bot.send_message(
+            chat_id=message.from_user.id,
+            text="✏️ Введите нового исполнителя (@username или user_id):",
+            reply_markup=remove_kb
+        )
 
         # Получаем список последних исполнителей из БД
         cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
         executors = cursor.fetchall()
-        # Создаем клавиатуру с вариантами
-        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        executor_buttons = []  # Временный список для кнопок
         
-        for executor in executors:
-            if executor[0]:  # Пропускаем пустые значения
-                executor_buttons.append(types.KeyboardButton(executor[0]))
-                
-                # Добавляем по 2 кнопки в ряд
-                if len(executor_buttons) == 2:
-                    keyboard.row(*executor_buttons)
-                    executor_buttons = []
+        if executors:
+            # Создаем клавиатуру с вариантами
+            keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+            executor_buttons = []
+            
+            for executor in executors:
+                if executor[0]:  # Пропускаем пустые значения
+                    executor_buttons.append(types.KeyboardButton(executor[0]))
+                    
+                    # Добавляем по 2 кнопки в ряд
+                    if len(executor_buttons) == 2:
+                        keyboard.row(*executor_buttons)
+                        executor_buttons = []
+            
+            # Добавляем оставшиеся кнопки, если их количество нечетное
+            if executor_buttons:
+                keyboard.row(*executor_buttons)
+            
+            await bot.send_message(
+                chat_id=message.from_user.id,
+                text="👤 Или выберите исполнителя из списка:",
+                reply_markup=keyboard
+            )
         
-        # Добавляем оставшиеся кнопки, если их количество нечетное
-        if executor_buttons:
-            keyboard.row(*executor_buttons)
+        await ExecutorUpdate.waiting_for_new_executor.set()
         
+    except ValueError:
         await bot.send_message(
             chat_id=message.from_user.id,
-            text="👤 Выберите исполнителя из списка или введите @username вручную:",
-            reply_markup=keyboard
+            text="⚠ Введите числовой ID задачи!",
+            reply_markup=types.ReplyKeyboardRemove()
         )
-        await ExecutorUpdate.waiting_for_new_executor.set()
-    except ValueError:
-        await bot.send_message(chat_id=message.from_user.id, text="⚠ Введите числовой ID задачи!")
         await state.finish()
 
 @dp.message_handler(state=ExecutorUpdate.waiting_for_new_executor)
@@ -830,7 +845,7 @@ async def process_new_executor(message: types.Message, state: FSMContext):
         new_executor = message.text.strip()
         user_data = await state.get_data()
         task_id = user_data['task_id']
-        chat_type = message_obj.chat.type 
+        chat_type = message.chat.type
   
         cursor = conn.cursor()
         cursor.execute("UPDATE tasks SET user_id=? WHERE id=?", (new_executor, task_id))
