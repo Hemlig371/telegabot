@@ -1167,7 +1167,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
         for task in tasks:
             task_id, task_user, task_text, status, deadline = task
             result.append(
-                f"🔹 ID: {task_id} 👤: {task_user}\n"
+                f"🔹 ID: {task_id} 👤: {task_user if task_user else 'Без исполнителя'}\n"
                 f"📝: {task_text}\n"
                 f"🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
                 f"──────────"
