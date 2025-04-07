@@ -76,6 +76,7 @@ def init_db():
         raise
 
 conn = init_db()
+update_allowed_users(conn)
 
 # ======================
 # КЛАВИАТУРЫ И ИНТЕРФЕЙС
