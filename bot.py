@@ -300,13 +300,17 @@ async def process_title(message: types.Message, state: FSMContext):
         reply_markup=keyboard
     )
     
+    # Сохраняем ID сообщения для возможного удаления
+    await state.update_data(last_message_id=sent_msg.message_id, chat_id=message.chat.id)
+    
     # Удалить через N секунд только в групповых чатах
     if message.chat.type != "private":  # Проверяем, что это не личный чат
         await asyncio.sleep(5)
         try:
-            await bot.delete_message(chat_id=sent_msg.chat.id, message_id=sent_msg.message_id)
+            await bot.delete_message(chat_id=message.chat.id, message_id=sent_msg.message_id)
         except Exception as e:
             logger.error(f"Ошибка при удалении сообщения: {e}")
+    
     await TaskCreation.waiting_for_executor.set()
 
 @dp.message_handler(state=TaskCreation.waiting_for_executor)
@@ -323,13 +327,17 @@ async def process_executor(message: types.Message, state: FSMContext):
         reply_markup=get_deadline_keyboard(with_none_option=True)
     )
     
+    # Сохраняем ID сообщения для возможного удаления
+    await state.update_data(last_message_id=sent_msg.message_id, chat_id=message.chat.id)
+    
     # Удалить через N секунд только в групповых чатах
     if message.chat.type != "private":  # Проверяем, что это не личный чат
         await asyncio.sleep(15)
         try:
-            await bot.delete_message(chat_id=sent_msg.chat.id, message_id=sent_msg.message_id)
+            await bot.delete_message(chat_id=message.chat.id, message_id=sent_msg.message_id)
         except Exception as e:
             logger.error(f"Ошибка при удалении сообщения: {e}")
+    
     await TaskCreation.waiting_for_deadline.set()
 
 @dp.callback_query_handler(lambda c: c.data.startswith("set_deadline_"), state=TaskCreation.waiting_for_deadline)
@@ -339,7 +347,7 @@ async def process_deadline(callback_query: types.CallbackQuery, state: FSMContex
         # Сохраняем callback_query в состоянии
         await state.update_data(callback_query=callback_query)
         await bot.send_message(chat_id=callback_query.from_user.id, text="⏳ Введите срок в формате YYYY-MM-DD:")
-        return
+
     elif callback_query.data == "set_deadline_none":
         await save_task(callback_query, state, deadline=None)
     else:
@@ -365,6 +373,7 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
             
     except ValueError:
         await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка! Введите дату в формате YYYY-MM-DD.")
+        await state.finish()
 
 async def save_task(message_obj, state: FSMContext, deadline: str):
     """Сохранение задачи в БД"""
@@ -411,17 +420,32 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
         )
         
         # Удалить через N секунд только в групповых чатах
-        if message.chat.type != "private":  # Проверяем, что это не личный чат
+        if chat_type != "private":
             await asyncio.sleep(5)
             try:
-                await bot.delete_message(chat_id=sent_msg.chat.id, message_id=sent_msg.message_id)
+                await bot.delete_message(chat_id=chat_id, message_id=sent_msg.message_id)
             except Exception as e:
                 logger.error(f"Ошибка при удалении сообщения: {e}")
   
     except sqlite3.Error as e:
         logger.error(f"Ошибка БД при сохранении задачи: {e}")
         reply_target = message_obj.message if isinstance(message_obj, types.CallbackQuery) else message_obj
-        await reply_target.reply(f"⚠ Ошибка при сохранении задачи: {str(e)}")
+        sent_msg = await reply_target.reply(f"⚠ Ошибка при сохранении задачи: {str(e)}")
+        
+        # Удалить через N секунд только в групповых чатах
+        if isinstance(message_obj, types.CallbackQuery):
+            chat_type = message_obj.message.chat.type
+            chat_id = message_obj.message.chat.id
+        else:
+            chat_type = message_obj.chat.type
+            chat_id = message_obj.chat.id
+            
+        if chat_type != "private":
+            await asyncio.sleep(10)
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=sent_msg.message_id)
+            except Exception as e:
+                logger.error(f"Ошибка при удалении сообщения: {e}")
     finally:
         await state.finish()
 
