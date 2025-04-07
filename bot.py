@@ -67,6 +67,12 @@ def init_db():
                         tg_user_id TEXT PRIMARY KEY);
                         ''')
         conn.commit()
+
+        cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+                        tg_user_id TEXT PRIMARY KEY);
+                        ''')
+        conn.commit()
+      
         return conn
     except sqlite3.Error as e:
         logger.error(f"Ошибка при инициализации БД: {e}")
