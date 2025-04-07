@@ -794,18 +794,21 @@ async def process_manual_task_id_executor(message: types.Message, state: FSMCont
         await state.update_data(task_id=task_id)
         await bot.send_message(chat_id=message.from_user.id, text="✏️ Введите нового исполнителя (@username или user_id):")
 
+        # Получаем список последних исполнителей из БД
+        cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+        executors = cursor.fetchall()
         # Создаем клавиатуру с вариантами
         keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
         executor_buttons = []  # Временный список для кнопок
         
-            for executor in executors:
-                if executor[0]:  # Пропускаем пустые значения
-                    executor_buttons.append(types.KeyboardButton(executor[0]))
-                    
-                    # Добавляем по 2 кнопки в ряд
-                    if len(executor_buttons) == 2:
-                        keyboard.row(*executor_buttons)
-                        executor_buttons = []
+        for executor in executors:
+            if executor[0]:  # Пропускаем пустые значения
+                executor_buttons.append(types.KeyboardButton(executor[0]))
+                
+                # Добавляем по 2 кнопки в ряд
+                if len(executor_buttons) == 2:
+                    keyboard.row(*executor_buttons)
+                    executor_buttons = []
         
         # Добавляем оставшиеся кнопки, если их количество нечетное
         if executor_buttons:
