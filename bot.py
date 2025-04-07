@@ -278,18 +278,37 @@ async def new_task_start(message: types.Message):
 @dp.message_handler(state=TaskCreation.waiting_for_title)
 async def process_title(message: types.Message, state: FSMContext):
     """Обработка названия задачи"""
-    await state.update_data(title = message.text if message.text else message.caption if message.caption else message.forward_from_message.caption if message.forward_from_message else None)
-    await bot.send_message(chat_id=message.from_user.id, text="👤 Исполнитель (@username):")
+    await state.update_data(title=message.text)
+    
+    # Получаем список последних исполнителей из БД
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+    executors = cursor.fetchall()
+    
+    # Создаем клавиатуру с вариантами
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    for executor in executors:
+        if executor[0]:  # Пропускаем пустые значения
+            keyboard.add(types.KeyboardButton(executor[0]))
+    
+    await bot.send_message(
+        chat_id=message.from_user.id,
+        text="👤 Выберите исполнителя из списка или введите @username вручную:",
+        reply_markup=keyboard
+    )
     await TaskCreation.waiting_for_executor.set()
 
 @dp.message_handler(state=TaskCreation.waiting_for_executor)
 async def process_executor(message: types.Message, state: FSMContext):
     """Обработка исполнителя задачи"""
     executor = message.text.strip()
-
     await state.update_data(executor=executor)
-    await bot.send_message(chat_id=message.chat.id, text=
-        "⏳ Выберите срок или введите свой:",
+    
+    # Убираем клавиатуру после выбора
+    remove_kb = types.ReplyKeyboardRemove()
+    await bot.send_message(
+        chat_id=message.chat.id,
+        text="⏳ Выберите срок или введите свой:",
         reply_markup=get_deadline_keyboard(with_none_option=True)
     )
     await TaskCreation.waiting_for_deadline.set()
@@ -436,7 +455,7 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         
         # Парсим данные с помощью регулярных выражений
         task_match = re.search(r'^(.*?)(\s@|$)', text)
-        executor_match = re.search(r'@(\S+)', text)
+        executor_match = re.search(r'(@[^/]+)', text)
         deadline_match = re.search(r'/(\S+)', text)
         deadline_raw = deadline_match.group(1) if deadline_match else None
 
