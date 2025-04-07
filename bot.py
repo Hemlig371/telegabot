@@ -693,6 +693,7 @@ class ExecutorUpdate(StatesGroup):
 
 @dp.message_handler(lambda message: message.text == "👤 Изменить исполнителя")
 async def executor_select_task(message: types.Message):
+    """Начало процесса изменения исполнителя"""
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
@@ -705,6 +706,7 @@ async def executor_select_task(message: types.Message):
         await message.reply("❌ Нет задач для изменения исполнителя")
         return
 
+    # Создаем inline-клавиатуру с исполнителями
     keyboard = InlineKeyboardMarkup(row_width=2)
     for i in range(0, len(executors), 2):
         row = executors[i:i+2]
@@ -722,15 +724,17 @@ async def executor_select_task(message: types.Message):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("executor_filter|"), state=ExecutorUpdate.waiting_for_executor)
 async def process_executor_filter(callback_query: types.CallbackQuery, state: FSMContext):
+    """Обработка выбора исполнителя для фильтрации"""
     executor = callback_query.data.split("|")[-1]
     await state.update_data(executor=executor)
     await show_executor_tasks(callback_query.message, executor)
     await ExecutorUpdate.waiting_for_task_selection.set()
 
 async def show_executor_tasks(message_obj, executor):
+    """Отображение задач выбранного исполнителя"""
     try:
         cursor = conn.cursor()
-        if executor.lower() == "none":  # Проверяем, ищем ли задачи без исполнителя
+        if executor.lower() == "none":
             cursor.execute("""
                 SELECT id, task_text, status 
                 FROM tasks
@@ -767,21 +771,51 @@ async def show_executor_tasks(message_obj, executor):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("executor_task_"), state=ExecutorUpdate.waiting_for_task_selection)
 async def process_selected_task_executor(callback_query: types.CallbackQuery, state: FSMContext):
+    """Обработка выбранной задачи"""
     task_id = callback_query.data.split("_")[2]
     await state.update_data(task_id=task_id)
-    await bot.send_message(chat_id=callback_query.from_user.id, text="✏️ Введите нового исполнителя (@username или user_id):")
+    
+    # Получаем список исполнителей для inline-клавиатуры
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+    executors = cursor.fetchall()
+    
+    # Создаем inline-клавиатуру
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    for executor in executors:
+        if executor[0]:
+            buttons.append(InlineKeyboardButton(
+                executor[0], 
+                callback_data=f"executor_choice_{executor[0]}"
+            ))
+    
+    # Добавляем кнопку ручного ввода
+    keyboard.add(*buttons)
+    keyboard.row(InlineKeyboardButton(
+        "✏️ Ввести вручную", 
+        callback_data="executor_manual_input"
+    ))
+    
+    await bot.send_message(
+        chat_id=callback_query.from_user.id,
+        text="👤 Выберите нового исполнителя:",
+        reply_markup=keyboard
+    )
     await ExecutorUpdate.waiting_for_new_executor.set()
 
 @dp.callback_query_handler(
     lambda c: c.data == "executor_manual_id", 
-    state=[ExecutorUpdate.waiting_for_executor, ExecutorUpdate.waiting_for_task_selection]  # Добавить оба состояния
+    state=[ExecutorUpdate.waiting_for_executor, ExecutorUpdate.waiting_for_task_selection]
 )
 async def ask_for_manual_id_executor(callback_query: types.CallbackQuery):
+    """Обработка ручного ввода ID задачи"""
     await bot.send_message(chat_id=callback_query.from_user.id, text="✏️ Введите ID задачи:")
     await ExecutorUpdate.waiting_for_task_selection.set()
 
 @dp.message_handler(state=ExecutorUpdate.waiting_for_task_selection)
 async def process_manual_task_id_executor(message: types.Message, state: FSMContext):
+    """Обработка ручного ввода ID задачи"""
     try:
         task_id = int(message.text)
         cursor = conn.cursor()
@@ -793,31 +827,28 @@ async def process_manual_task_id_executor(message: types.Message, state: FSMCont
         
         await state.update_data(task_id=task_id)
         
-        # Получаем список последних исполнителей из БД (точно такой же запрос)
+        # Повторно используем логику создания inline-клавиатуры
         cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
         executors = cursor.fetchall()
         
-        # Создаем клавиатуру с вариантами (идентичный алгоритм)
-        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        executor_buttons = []
-        
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        buttons = []
         for executor in executors:
-            if executor[0]:  # Пропускаем пустые значения
-                executor_buttons.append(types.KeyboardButton(executor[0]))
-                
-                # Добавляем по 2 кнопки в ряд (как в создании задачи)
-                if len(executor_buttons) == 2:
-                    keyboard.row(*executor_buttons)
-                    executor_buttons = []
+            if executor[0]:
+                buttons.append(InlineKeyboardButton(
+                    executor[0], 
+                    callback_data=f"executor_choice_{executor[0]}"
+                ))
         
-        # Добавляем оставшиеся кнопки (идентичная логика)
-        if executor_buttons:
-            keyboard.row(*executor_buttons)
+        keyboard.add(*buttons)
+        keyboard.row(InlineKeyboardButton(
+            "✏️ Ввести вручную", 
+            callback_data="executor_manual_input"
+        ))
         
-        # Отправляем сообщение с такой же структурой
         await bot.send_message(
             chat_id=message.from_user.id,
-            text="👤 Выберите нового исполнителя из списка или введите @username вручную:",
+            text="👤 Выберите нового исполнителя:",
             reply_markup=keyboard
         )
         await ExecutorUpdate.waiting_for_new_executor.set()
@@ -826,31 +857,271 @@ async def process_manual_task_id_executor(message: types.Message, state: FSMCont
         await bot.send_message(chat_id=message.from_user.id, text="⚠ Введите числовой ID задачи!")
         await state.finish()
 
+@dp.callback_query_handler(
+    lambda c: c.data.startswith("executor_choice_"), 
+    state=ExecutorUpdate.waiting_for_new_executor
+)
+async def process_executor_choice(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка выбора исполнителя из списка"""
+    new_executor = callback.data.split("_")[2]
+    await process_and_save_executor(callback.message, new_executor, state)
+
+@dp.callback_query_handler(
+    lambda c: c.data == "executor_manual_input", 
+    state=ExecutorUpdate.waiting_for_new_executor
+)
+async def ask_manual_executor_input(callback: types.CallbackQuery):
+    """Запрос ручного ввода исполнителя"""
+    await bot.send_message(callback.from_user.id, "✏️ Введите @username или user_id:")
+    await ExecutorUpdate.waiting_for_new_executor.set()
+
 @dp.message_handler(state=ExecutorUpdate.waiting_for_new_executor)
 async def process_new_executor(message: types.Message, state: FSMContext):
+    """Обработка ручного ввода исполнителя"""
+    await process_and_save_executor(message, message.text.strip(), state)
+
+async def process_and_save_executor(message_obj, new_executor: str, state: FSMContext):
+    """Общая логика сохранения нового исполнителя"""
     try:
-        new_executor = message.text.strip()
         user_data = await state.get_data()
         task_id = user_data['task_id']
-        chat_type = message.chat.type
-  
+        chat_type = message_obj.chat.type
+
         cursor = conn.cursor()
         cursor.execute("UPDATE tasks SET user_id=? WHERE id=?", (new_executor, task_id))
         conn.commit()
 
-        # Определяем клавиатуру в зависимости от типа чата
         reply_markup = menu_keyboard if chat_type == "private" else group_menu_keyboard
-        
-        # Отправляем сообщение с клавиатурой
-        await bot.send_message(chat_id=message.from_user.id,text=f"✅ Исполнитель задачи {task_id} изменен на '{new_executor}'",
+        await bot.send_message(
+            chat_id=message_obj.chat.id,
+            text=f"✅ Исполнитель задачи {task_id} изменен на '{new_executor}'",
             reply_markup=reply_markup
         )
-        
         await state.finish()
         
     except Exception as e:
         logger.error(f"Ошибка при изменении исполнителя: {e}")
-        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при изменении исполнителя")
+        await bot.send_message(chat_id=message_obj.chat.id, text="⚠ Ошибка при изменении исполнителя")
+        await state.finish()# ======================
+# ИЗМЕНЕНИЕ ИСПОЛНИТЕЛЯ
+# ======================
+
+class ExecutorUpdate(StatesGroup):
+    waiting_for_executor = State()
+    waiting_for_task_selection = State()
+    waiting_for_new_executor = State()
+
+@dp.message_handler(lambda message: message.text == "👤 Изменить исполнителя")
+async def executor_select_task(message: types.Message):
+    """Начало процесса изменения исполнителя"""
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+        return
+    
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+    executors = cursor.fetchall()
+    
+    if not executors:
+        await message.reply("❌ Нет задач для изменения исполнителя")
+        return
+
+    # Создаем inline-клавиатуру с исполнителями
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    for i in range(0, len(executors), 2):
+        row = executors[i:i+2]
+        row_buttons = [
+            InlineKeyboardButton(
+                f"👤 {executor[0] if executor[0] else 'Без исполнителя'}",
+                callback_data=f"executor_filter|{executor[0]}"
+            ) for executor in row
+        ]
+        keyboard.add(*row_buttons)
+    
+    keyboard.add(InlineKeyboardButton("✏️ Ввести ID задачи", callback_data="executor_manual_id"))
+    await message.reply("Выберите исполнителя для фильтрации задач:", reply_markup=keyboard)
+    await ExecutorUpdate.waiting_for_executor.set()
+
+@dp.callback_query_handler(lambda c: c.data.startswith("executor_filter|"), state=ExecutorUpdate.waiting_for_executor)
+async def process_executor_filter(callback_query: types.CallbackQuery, state: FSMContext):
+    """Обработка выбора исполнителя для фильтрации"""
+    executor = callback_query.data.split("|")[-1]
+    await state.update_data(executor=executor)
+    await show_executor_tasks(callback_query.message, executor)
+    await ExecutorUpdate.waiting_for_task_selection.set()
+
+async def show_executor_tasks(message_obj, executor):
+    """Отображение задач выбранного исполнителя"""
+    try:
+        cursor = conn.cursor()
+        if executor.lower() == "none":
+            cursor.execute("""
+                SELECT id, task_text, status 
+                FROM tasks
+                WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено')
+                ORDER BY id DESC 
+                LIMIT 20
+            """)
+        else:
+            cursor.execute("""
+                SELECT id, task_text, status 
+                FROM tasks
+                WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено')
+                ORDER BY id DESC 
+                LIMIT 20
+            """, (executor,))
+        
+        tasks = cursor.fetchall()
+
+        keyboard = InlineKeyboardMarkup(row_width=1)
+        for task_id, task_text, current_executor in tasks:
+            keyboard.add(InlineKeyboardButton(
+                f"{task_text[:30]}... (ID: {task_id})", 
+                callback_data=f"executor_task_{task_id}"
+            ))
+
+        keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="executor_manual_id"))
+        await bot.send_message(
+            chat_id=message_obj.chat.id,
+            text=f"Задачи исполнителя {executor}:",
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при получении задач: {e}")
+
+@dp.callback_query_handler(lambda c: c.data.startswith("executor_task_"), state=ExecutorUpdate.waiting_for_task_selection)
+async def process_selected_task_executor(callback_query: types.CallbackQuery, state: FSMContext):
+    """Обработка выбранной задачи"""
+    task_id = callback_query.data.split("_")[2]
+    await state.update_data(task_id=task_id)
+    
+    # Получаем список исполнителей для inline-клавиатуры
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+    executors = cursor.fetchall()
+    
+    # Создаем inline-клавиатуру
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    for executor in executors:
+        if executor[0]:
+            buttons.append(InlineKeyboardButton(
+                executor[0], 
+                callback_data=f"executor_choice_{executor[0]}"
+            ))
+    
+    # Добавляем кнопку ручного ввода
+    keyboard.add(*buttons)
+    keyboard.row(InlineKeyboardButton(
+        "✏️ Ввести вручную", 
+        callback_data="executor_manual_input"
+    ))
+    
+    await bot.send_message(
+        chat_id=callback_query.from_user.id,
+        text="👤 Выберите нового исполнителя:",
+        reply_markup=keyboard
+    )
+    await ExecutorUpdate.waiting_for_new_executor.set()
+
+@dp.callback_query_handler(
+    lambda c: c.data == "executor_manual_id", 
+    state=[ExecutorUpdate.waiting_for_executor, ExecutorUpdate.waiting_for_task_selection]
+)
+async def ask_for_manual_id_executor(callback_query: types.CallbackQuery):
+    """Обработка ручного ввода ID задачи"""
+    await bot.send_message(chat_id=callback_query.from_user.id, text="✏️ Введите ID задачи:")
+    await ExecutorUpdate.waiting_for_task_selection.set()
+
+@dp.message_handler(state=ExecutorUpdate.waiting_for_task_selection)
+async def process_manual_task_id_executor(message: types.Message, state: FSMContext):
+    """Обработка ручного ввода ID задачи"""
+    try:
+        task_id = int(message.text)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
+        if not cursor.fetchone():
+            await bot.send_message(chat_id=message.from_user.id, text="⚠ Задача не найдена!")
+            await state.finish()
+            return
+        
+        await state.update_data(task_id=task_id)
+        
+        # Повторно используем логику создания inline-клавиатуры
+        cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+        executors = cursor.fetchall()
+        
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        buttons = []
+        for executor in executors:
+            if executor[0]:
+                buttons.append(InlineKeyboardButton(
+                    executor[0], 
+                    callback_data=f"executor_choice_{executor[0]}"
+                ))
+        
+        keyboard.add(*buttons)
+        keyboard.row(InlineKeyboardButton(
+            "✏️ Ввести вручную", 
+            callback_data="executor_manual_input"
+        ))
+        
+        await bot.send_message(
+            chat_id=message.from_user.id,
+            text="👤 Выберите нового исполнителя:",
+            reply_markup=keyboard
+        )
+        await ExecutorUpdate.waiting_for_new_executor.set()
+        
+    except ValueError:
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Введите числовой ID задачи!")
+        await state.finish()
+
+@dp.callback_query_handler(
+    lambda c: c.data.startswith("executor_choice_"), 
+    state=ExecutorUpdate.waiting_for_new_executor
+)
+async def process_executor_choice(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка выбора исполнителя из списка"""
+    new_executor = callback.data.split("_")[2]
+    await process_and_save_executor(callback.message, new_executor, state)
+
+@dp.callback_query_handler(
+    lambda c: c.data == "executor_manual_input", 
+    state=ExecutorUpdate.waiting_for_new_executor
+)
+async def ask_manual_executor_input(callback: types.CallbackQuery):
+    """Запрос ручного ввода исполнителя"""
+    await bot.send_message(callback.from_user.id, "✏️ Введите @username или user_id:")
+    await ExecutorUpdate.waiting_for_new_executor.set()
+
+@dp.message_handler(state=ExecutorUpdate.waiting_for_new_executor)
+async def process_new_executor(message: types.Message, state: FSMContext):
+    """Обработка ручного ввода исполнителя"""
+    await process_and_save_executor(message, message.text.strip(), state)
+
+async def process_and_save_executor(message_obj, new_executor: str, state: FSMContext):
+    """Общая логика сохранения нового исполнителя"""
+    try:
+        user_data = await state.get_data()
+        task_id = user_data['task_id']
+        chat_type = message_obj.chat.type
+
+        cursor = conn.cursor()
+        cursor.execute("UPDATE tasks SET user_id=? WHERE id=?", (new_executor, task_id))
+        conn.commit()
+
+        reply_markup = menu_keyboard if chat_type == "private" else group_menu_keyboard
+        await bot.send_message(
+            chat_id=message_obj.chat.id,
+            text=f"✅ Исполнитель задачи {task_id} изменен на '{new_executor}'",
+            reply_markup=reply_markup
+        )
+        await state.finish()
+        
+    except Exception as e:
+        logger.error(f"Ошибка при изменении исполнителя: {e}")
+        await bot.send_message(chat_id=message_obj.chat.id, text="⚠ Ошибка при изменении исполнителя")
         await state.finish()
 
 # ======================
