@@ -134,14 +134,6 @@ def get_deadline_keyboard(with_none_option=False):
 
     return keyboard
 
-# Клавиатура выбора статуса
-def get_status_keyboard(task_id):
-    keyboard = InlineKeyboardMarkup(row_width=3)
-    statuses = ["новая", "в работе", "ожидает доклада", "исполнено", "удалено"]
-    buttons = [InlineKeyboardButton(status, callback_data=f"set_status_{task_id}_{status}") for status in statuses]
-    keyboard.add(*buttons)
-    return keyboard
-
 # ======================
 # ОБРАБОТЧИКИ КОМАНД
 # ======================
@@ -612,7 +604,7 @@ async def show_filtered_tasks(message_obj, executor):
         
         await bot.send_message(
             chat_id=message_obj.chat.id,
-            text=f"Задачи исполнителя {executor}:",
+            text=f"Задачи исполнителя {executor if executor else 'Без исполнителя'}:",
             reply_markup=keyboard
         )
         
@@ -763,7 +755,7 @@ async def show_executor_tasks(message_obj, executor):
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="executor_manual_id"))
         await bot.send_message(
             chat_id=message_obj.chat.id,
-            text=f"Задачи исполнителя {executor}:",
+            text=f"Задачи исполнителя {executor if executor else 'Без исполнителя'}:",
             reply_markup=keyboard
         )
     except Exception as e:
@@ -982,7 +974,7 @@ async def show_deadline_tasks(message_obj, executor):
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="deadline_manual_id"))
         await bot.send_message(
             chat_id=message_obj.chat.id,
-            text=f"Задачи исполнителя {executor}:",
+            text=f"Задачи исполнителя {executor if executor else 'Без исполнителя'}:",
             reply_markup=keyboard
         )
     except Exception as e:
