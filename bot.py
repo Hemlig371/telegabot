@@ -542,13 +542,22 @@ async def show_filtered_tasks(message_obj, executor):
     """Показать задачи выбранного исполнителя"""
     try:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, task_text, status 
-            FROM tasks
-            WHERE CASE WHEN user_id='None' then null else user_id end =? AND status<>'удалено'
-            ORDER BY id DESC 
-            LIMIT 20
-        """, (executor,))
+        if executor.lower() == "none":  # Проверяем, ищем ли задачи без исполнителя
+            cursor.execute("""
+                SELECT id, task_text, status 
+                FROM tasks
+                WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено')
+                ORDER BY id DESC 
+                LIMIT 20
+            """)
+        else:
+            cursor.execute("""
+                SELECT id, task_text, status 
+                FROM tasks
+                WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено')
+                ORDER BY id DESC 
+                LIMIT 20
+            """, (executor,))
         
         tasks = cursor.fetchall()
 
