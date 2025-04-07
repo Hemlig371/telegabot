@@ -167,7 +167,7 @@ async def set_bot_commands(bot: Bot):
 
 @dp.message_handler(commands=["start"])
 async def start_command(message: types.Message):
-    if message.from_user.id not in ALLOWED_USERS or message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ALLOWED_USERS and message.from_user.id != ADMIN_ID:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
 
@@ -1287,8 +1287,8 @@ class AddUserState(StatesGroup):
 
 @dp.message_handler(commands=["adduser"])
 async def add_user_command(update: types.Message):
-    if update.from_user.id != ADMIN_ID:
-        await bot.send_message(chat_id=update.from_user.id, text="⛔ Только администратор может добавлять пользователей")
+    if message.from_user.id != ADMIN_ID:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только администратор может добавлять пользователей")
         return
     
     # Переводим в состояние ожидания ID пользователя
