@@ -793,30 +793,33 @@ async def process_manual_task_id_executor(message: types.Message, state: FSMCont
         
         await state.update_data(task_id=task_id)
         
-        # Явно удаляем предыдущую клавиатуру
-        remove_kb = types.ReplyKeyboardRemove()
+        # Получаем список последних исполнителей из БД (точно такой же запрос)
+        cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+        executors = cursor.fetchall()
+        
+        # Создаем клавиатуру с вариантами (идентичный алгоритм)
+        keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        executor_buttons = []
+        
+        for executor in executors:
+            if executor[0]:  # Пропускаем пустые значения
+                executor_buttons.append(types.KeyboardButton(executor[0]))
+                
+                # Добавляем по 2 кнопки в ряд (как в создании задачи)
+                if len(executor_buttons) == 2:
+                    keyboard.row(*executor_buttons)
+                    executor_buttons = []
+        
+        # Добавляем оставшиеся кнопки (идентичная логика)
+        if executor_buttons:
+            keyboard.row(*executor_buttons)
+        
+        # Отправляем сообщение с такой же структурой
         await bot.send_message(
             chat_id=message.from_user.id,
-            text="✏️ Введите нового исполнителя (@username или user_id):",
-            reply_markup=remove_kb
+            text="👤 Выберите нового исполнителя из списка или введите @username вручную:",
+            reply_markup=keyboard
         )
-
-        # Получаем исполнителей и создаем клавиатуру
-        cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' AND user_id IS NOT NULL LIMIT 20")
-        executors = [e[0] for e in cursor.fetchall() if e[0]]
-        
-        if executors:
-            keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-            for i in range(0, len(executors), 2):
-                row = executors[i:i+2]
-                keyboard.row(*[types.KeyboardButton(name) for name in row])
-            
-            await bot.send_message(
-                chat_id=message.from_user.id,
-                text="👤 Или выберите из списка:",
-                reply_markup=keyboard
-            )
-        
         await ExecutorUpdate.waiting_for_new_executor.set()
         
     except ValueError:
