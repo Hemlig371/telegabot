@@ -547,7 +547,7 @@ async def show_filtered_tasks(message_obj, executor):
             FROM tasks
             WHERE user_id=? AND status<>'удалено'
             ORDER BY id DESC 
-            LIMIT 10
+            LIMIT 20
         """, (executor,))
         
         tasks = cursor.fetchall()
@@ -555,7 +555,7 @@ async def show_filtered_tasks(message_obj, executor):
         keyboard = InlineKeyboardMarkup(row_width=1)
         for task_id, task_text, status in tasks:
             keyboard.add(InlineKeyboardButton(
-                f"{task_text[:30]}... (ID: {task_id}, текущий: {status})", 
+                f"{task_text[:30]}... (🔹: {task_id}, 🔄: {status})", 
                 callback_data=f"status_task_{task_id}"
             ))
         
