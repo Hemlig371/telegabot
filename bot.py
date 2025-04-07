@@ -732,7 +732,10 @@ async def process_selected_task_executor(callback_query: types.CallbackQuery, st
     await bot.send_message(chat_id=callback_query.from_user.id, text="✏️ Введите нового исполнителя (@username или user_id):")
     await ExecutorUpdate.waiting_for_new_executor.set()
 
-@dp.callback_query_handler(lambda c: c.data == "executor_manual_id", state=ExecutorUpdate.waiting_for_task_selection)
+@dp.callback_query_handler(
+    lambda c: c.data == "executor_manual_id", 
+    state=[ExecutorUpdate.waiting_for_executor, ExecutorUpdate.waiting_for_task_selection]  # Добавить оба состояния
+)
 async def ask_for_manual_id_executor(callback_query: types.CallbackQuery):
     await bot.send_message(chat_id=callback_query.from_user.id, text="✏️ Введите ID задачи:")
     await ExecutorUpdate.waiting_for_task_selection.set()
@@ -866,9 +869,11 @@ async def process_selected_task(callback_query: types.CallbackQuery, state: FSMC
     await show_deadline_options(callback_query.message)
     await TaskUpdate.waiting_for_deadline_choice.set()
 
-@dp.callback_query_handler(lambda c: c.data == "deadline_manual_id", state=TaskUpdate.waiting_for_task_selection)
+@dp.callback_query_handler(
+    lambda c: c.data == "deadline_manual_id", 
+    state=[TaskUpdate.waiting_for_executor, TaskUpdate.waiting_for_task_selection]  # Добавить оба состояния
+)
 async def ask_for_manual_id(callback_query: types.CallbackQuery):
-    """Запрос ручного ввода ID"""
     await bot.send_message(chat_id=callback_query.from_user.id, text="✏️ Введите ID задачи:")
     await TaskUpdate.waiting_for_task_selection.set()
 
