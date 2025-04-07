@@ -98,24 +98,26 @@ def get_deadline_keyboard(with_none_option=False):
         "Послезавтра": (today + timedelta(days=2)).strftime("%Y-%m-%d"),
     }
 
+    # Дополнительные кнопки
+    if with_none_option:
+        dates["❌ Без срока"] = "set_deadline_none"
+    dates["Свой срок"] = "set_deadline_custom"
+
     keyboard = InlineKeyboardMarkup(row_width=2)  # 2 кнопки в ряду
     
     # Добавляем кнопки парами
     buttons = []
     for label, date in dates.items():
-        buttons.append(InlineKeyboardButton(label, callback_data=f"set_deadline_{date}"))
-    
-    # Дополнительные кнопки
-    if with_none_option:
-        keyboard.add(InlineKeyboardButton("❌ Без срока", callback_data="set_deadline_none"))
-    
-    keyboard.add(InlineKeyboardButton("Свой срок", callback_data="set_deadline_custom"))
+        if label == "❌ Без срока" or label == "Свой срок":
+            buttons.append(InlineKeyboardButton(label, callback_data=date))  # для этих кнопок callback_data = date
+        else:
+            buttons.append(InlineKeyboardButton(label, callback_data=f"set_deadline_{date}"))  # для остальных - в формате f"set_deadline_{date}"
 
     # Распределяем кнопки по 2 в ряд
     for i in range(0, len(buttons), 2):
         row = buttons[i:i+2]
         keyboard.row(*row)
-    
+
     return keyboard
 
 # Клавиатура выбора статуса
