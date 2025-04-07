@@ -872,7 +872,7 @@ async def process_executor_choice(callback: types.CallbackQuery, state: FSMConte
 )
 async def ask_manual_executor_input(callback: types.CallbackQuery):
     """Запрос ручного ввода исполнителя"""
-    await bot.send_message(callback.from_user.id, "✏️ Введите @username или user_id:")
+    await bot.send_message(callback.from_user.id, "✏️ Введите @username")
     await ExecutorUpdate.waiting_for_new_executor.set()
 
 @dp.message_handler(state=ExecutorUpdate.waiting_for_new_executor)
@@ -1167,8 +1167,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
         for task in tasks:
             task_id, task_user, task_text, status, deadline = task
             result.append(
-                f"🔹 ID: {task_id} 👤: {str(task_user) if task_user is not None else 'Без исполнителя'}\n"
-                f"📝: {task_text}\n"
+                f"🔹: {task_id} 📝: {task_text}"
                 f"🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
                 f"──────────"
             )
@@ -1183,7 +1182,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
         
         header = f"📋 Список задач (страница {page+1} из {total_pages+1})"
         if executor_filter:
-            header = f"📋 Задачи для <b>{executor_filter}</b> (страница {page+1} из {total_pages+1})"
+            header = f"📋 Задачи для 👤: <b>{str(executor_filter) if executor_filter is not None else 'Без исполнителя'}</b> (страница {page+1} из {total_pages+1})"
         
         sent_message = await bot.send_message(
             chat_id=message.chat.id,
@@ -1689,7 +1688,7 @@ async def process_user_id(message: types.Message, state: FSMContext):
 
 @dp.message_handler(commands=["myid"])
 async def get_user_id(message: types.Message):
-    await bot.send_message(chat_id=message.from_user.id,text=f"🆔 Ваш ID: `{message.from_user.id}`", parse_mode="Markdown")
+    await bot.send_message(chat_id=message.from_user.id,text=f"Ваш 🆔 `{message.from_user.id}`", parse_mode="Markdown")
 
 # ======================
 # ФОНОВЫЕ ЗАДАЧИ
