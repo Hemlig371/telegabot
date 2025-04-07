@@ -122,7 +122,7 @@ def get_deadline_keyboard(with_none_option=False):
 
 # Клавиатура выбора статуса
 def get_status_keyboard(task_id):
-    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard = InlineKeyboardMarkup(row_width=3)
     statuses = ["новая", "в работе", "ожидает доклада", "исполнено", "удалено"]
     buttons = [InlineKeyboardButton(status, callback_data=f"set_status_{task_id}_{status}") for status in statuses]
     keyboard.add(*buttons)
@@ -1104,7 +1104,7 @@ async def export_tasks_to_csv3(message: types.Message):
         )
         
         # Заголовки столбцов
-        headers = ['ID', 'ID создателя', 'Исполнитель', 'Задача', 'Статус', 'Срок']
+        headers = ['ID', 'Исполнитель', 'ID создателя', 'Задача', 'Статус', 'Срок']
         writer.writerow(headers)
         
         # Данные
