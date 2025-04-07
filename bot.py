@@ -424,6 +424,9 @@ class QuickTaskCreation(StatesGroup):
 
 @dp.message_handler(lambda message: message.text == "⚡ Быстрая задача")
 async def quick_task_start(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+        return
     """Начало быстрого создания задачи"""
     await bot.send_message(chat_id=message.from_user.id, text=
         "📝 Введите данные в формате:\n"
