@@ -287,9 +287,20 @@ async def process_title(message: types.Message, state: FSMContext):
     
     # Создаем клавиатуру с вариантами
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    executor_buttons = []  # Временный список для кнопок
+    
     for executor in executors:
         if executor[0]:  # Пропускаем пустые значения
-            keyboard.add(types.KeyboardButton(executor[0]))
+            executor_buttons.append(types.KeyboardButton(executor[0]))
+            
+            # Добавляем по 2 кнопки в ряд
+            if len(executor_buttons) == 2:
+                keyboard.row(*executor_buttons)
+                executor_buttons = []
+    
+    # Добавляем оставшиеся кнопки, если их количество нечетное
+    if executor_buttons:
+        keyboard.row(*executor_buttons)
     
     await bot.send_message(
         chat_id=message.from_user.id,
@@ -381,6 +392,21 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
             await bot.send_message(chat_id=message_obj.from_user.id, text=response, parse_mode=ParseMode.HTML)
         else:
             await bot.send_message(chat_id=message_obj.from_user.id, text=response, parse_mode=ParseMode.HTML)
+
+        # Определяем клавиатуру в зависимости от типа чата
+        if chat_type == "private":
+            keyboard = menu_keyboard
+        else:
+            keyboard = group_menu_keyboard
+            
+        # Отправляем ответ с соответствующей клавиатурой
+        await bot.send_message(
+            chat_id=chat_id,
+            text=response,
+            parse_mode=ParseMode.HTML,
+            reply_markup=keyboard
+        )
+  
     except sqlite3.Error as e:
         logger.error(f"Ошибка БД при сохранении задачи: {e}")
         reply_target = message_obj.message if isinstance(message_obj, types.CallbackQuery) else message_obj
