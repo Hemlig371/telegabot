@@ -1286,24 +1286,46 @@ async def cancel_task_deletion(callback_query: types.CallbackQuery):
 # Добавление пользователя
 # ======================
 
+class AddUserState(StatesGroup):
+    waiting_for_user_id = State()  # Ожидаем ID пользователя
+
 @dp.message_handler(commands=["adduser"])
-async def add_user_command(update: types.Message, context):
+async def add_user_command(update: types.Message):
     if update.from_user.id != ADMIN_ID:
         await bot.send_message(chat_id=update.from_user.id, text="⛔ Только администратор может добавлять пользователей")
         return
+    
+    # Переводим в состояние ожидания ID пользователя
+    await AddUserState.waiting_for_user_id.set()
+    await update.message.reply_text("⏳ Введите ID пользователя для добавления в список разрешенных:")
 
-    conn = context.bot_data['db_connection']
-    user_id = str(update.from_user.id)
+@dp.message_handler(state=AddUserState.waiting_for_user_id)
+async def process_user_id(message: types.Message, state: FSMContext):
+    user_id = message.text.strip()
+
+    if not user_id.isdigit():
+        await message.reply("❌ Введите корректный ID пользователя.")
+        return
+
+    # Получаем подключение к базе данных из контекста
+    conn = message.bot.get('db_connection')  # Здесь предполагается, что подключение к БД хранится в контексте
+    user_id = str(user_id)
 
     try:
+        # Вставляем в базу данных
         conn.execute('INSERT INTO users (tg_user_id) VALUES (?)', (user_id,))
         conn.commit()
+        
+        # Обновляем список разрешенных пользователей
         update_allowed_users(conn)
-        await update.message.reply_text("✅ Вы успешно добавлены в список разрешенных пользователей!")
+        
+        # Отправляем подтверждение
+        await message.reply("✅ Пользователь успешно добавлен в список разрешенных!")
+        
     except sqlite3.Error as e:
-        await update.message.reply_text("❌ Произошла ошибка при добавлении в базу данных")
-
-    """Экспорт всех пользователей в CSV файл с кодировкой win1251"""
+        await message.reply("❌ Произошла ошибка при добавлении в базу данных")
+    
+    # Теперь экспортируем всех пользователей в CSV файл
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT tg_user_id FROM users")
@@ -1332,27 +1354,27 @@ async def add_user_command(update: types.Message, context):
 
         # Данные
         for user in users:
-            # Преобразуем все значения в строки
-            row = [
-                str(user[0]) if user[0] is not None else ''  # Пользователь tg_user_id
-            ]
+            row = [str(user[0]) if user[0] is not None else '']
             writer.writerow(row)
 
         # Важно: закрыть TextIOWrapper перед использованием буфера
         text_buffer.flush()
-        text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
+        text_buffer.detach()
         output.seek(0)
 
         # Создаем временный файл
         csv_file = InputFile(output, filename="users_export.csv")
 
-        await update.message.reply_document(
+        await message.reply_document(
             document=csv_file
         )
 
     except Exception as e:
         logger.error(f"Ошибка при экспорте пользователей: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=update.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+        await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+
+    # Завершаем состояние после выполнения всех действий
+    await state.finish()
 
 # ======================
 # ID Пользователя
