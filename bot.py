@@ -280,7 +280,7 @@ async def process_executor(message: types.Message, state: FSMContext):
     await state.update_data(executor=executor)
     await bot.send_message(chat_id=message.chat.id, text=
         "⏳ Выберите срок или введите свой:",
-        reply_markup=get_deadline_keyboard(with_none_option=True)
+        reply_markup=get_deadline_keyboard(with_none_option=True, is_private=True)
     )
     await TaskCreation.waiting_for_deadline.set()
 
@@ -410,7 +410,7 @@ async def quick_task_start(message: types.Message):
     """Начало быстрого создания задачи"""
     await bot.send_message(chat_id=message.from_user.id, text=
         "📝 Введите данные в формате:\n"
-        "текст задачи @исполнитель --срок"
+        "текст задачи @исполнитель /срок"
     )
     await QuickTaskCreation.waiting_for_full_data.set()
 
@@ -424,7 +424,7 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         # Парсим данные с помощью регулярных выражений
         task_match = re.search(r'^(.*?)(\s@|$)', text)
         executor_match = re.search(r'@(\S+)', text)
-        deadline_match = re.search(r'--(\S+)', text)
+        deadline_match = re.search(r'/(\S+)', text)
         deadline_raw = deadline_match.group(1) if deadline_match else None
 
         task_text = task_match.group(1).strip() if task_match else None
