@@ -786,19 +786,18 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
 # СПИСОК ЗАДАЧ
 # ======================
 
-current_page = {}
-
-@dp.message_handler(lambda message: message.text == "📋 Список задач")
-async def choose_user_for_list(message: types.Message):
+@dp.message_handler(lambda message: message.text == "📤 Экспорт задач")
+async def choose_user_for_export(message: types.Message):
+    """Обработчик выбора пользователя для экспорта задач."""
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
-    
+
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status NOT IN ('удалено','исполнено')")
         user_ids = cursor.fetchall()
-        
+
         if not user_ids:
             await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет пользователей с задачами.")
             return
@@ -807,49 +806,34 @@ async def choose_user_for_list(message: types.Message):
         keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
         for user in user_ids:
             keyboard.add(KeyboardButton(str(user[0])))
-        
-        await bot.send_message(chat_id=message.from_user.id, text="Выберите user_id для просмотра задач:", reply_markup=keyboard)
-        
+
+        await bot.send_message(chat_id=message.from_user.id, text="Выберите user_id для экспорта задач:", reply_markup=keyboard)
+
     except Exception as e:
         logger.error(f"Ошибка при формировании списка пользователей: {str(e)}", exc_info=True)
         await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при получении списка пользователей: {str(e)}")
 
-@dp.message_handler(lambda message: message.text.isdigit())
-async def list_tasks(message: types.Message):
-    user_id = int(message.text)
-    current_page[user_id] = 0  # Сбрасываем на первую страницу при новом запросе
-    
-    sent_message = await show_tasks_page(message, user_id, page=0)
-    
-    if sent_message:
-        current_page[f"{user_id}_message_id"] = sent_message.message_id
 
-async def show_tasks_page(message: types.Message, user_id: int, page: int):
+@dp.message_handler(lambda message: message.text.isdigit())
+async def export_tasks(message: types.Message):
+    """Обработчик экспорта задач для выбранного пользователя."""
+    user_id = int(message.text)
+
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status NOT IN ('удалено','исполнено')", (user_id,))
-        total_tasks = cursor.fetchone()[0]
-        
-        if total_tasks == 0:
-            return await bot.send_message(message.from_user.id, "📭 У пользователя нет активных задач.")
-        
-        total_pages = (total_tasks - 1) // 5
-        
-        if page < 0:
-            page = 0
-        elif page > total_pages:
-            page = total_pages
-        
         cursor.execute("""
             SELECT id, task_text, status, deadline 
             FROM tasks 
             WHERE user_id = ? AND status NOT IN ('удалено','исполнено')
-            ORDER BY id DESC 
-            LIMIT 5 OFFSET ?
-        """, (user_id, page * 5))
+            ORDER BY id DESC
+        """, (user_id,))
         tasks = cursor.fetchall()
-        
-        result = []
+
+        if not tasks:
+            await bot.send_message(message.from_user.id, "📭 У пользователя нет активных задач.")
+            return
+
+        result = [f"📋 Список задач пользователя {user_id}:\n"]
         for task in tasks:
             task_id, task_text, status, deadline = task
             result.append(
@@ -858,62 +842,15 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int):
                 f"🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
                 f"──────────"
             )
-        
-        keyboard = InlineKeyboardMarkup(row_width=3)
-        buttons = []
-        if page > 0:
-            buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"tasks_prev_{user_id}_{page-1}"))
-        
-        buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages+1}", callback_data="tasks_page"))
-        
-        if page < total_pages:
-            buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=f"tasks_next_{user_id}_{page+1}"))
-        
-        keyboard.row(*buttons)
-        
-        sent_message = await bot.send_message(
-            chat_id=message.chat.id,
-            text=f"📋 Список задач пользователя {user_id} (страница {page+1} из {total_pages+1}):\n\n" + "\n".join(result),
-            reply_markup=keyboard
-        )
-        return sent_message
-        
-    except Exception as e:
-        logger.error(f"Ошибка при отображении страницы задач: {str(e)}")
-        await bot.send_message(message.from_user.id, "⚠ Ошибка при отображении задач.")
-        return None
 
-@dp.callback_query_handler(lambda c: c.data.startswith(("tasks_prev_", "tasks_next_")))
-async def process_tasks_pagination(callback_query: types.CallbackQuery):
-    try:
-        user_id, page = map(int, callback_query.data.split("_")[2:4])
-        current_page[user_id] = page
-        
-        chat_id = callback_query.message.chat.id
-        
-        class FakeMessage:
-            def __init__(self, chat_id):
-                self.chat = type('Chat', (), {'id': chat_id})()
-                self.from_user = type('User', (), {'id': user_id})()
-        
-        fake_message = FakeMessage(chat_id)
-        sent_message = await show_tasks_page(fake_message, user_id, page)
-        
-        try:
-            prev_message_id = current_page.get(f"{user_id}_message_id")
-            if prev_message_id:
-                await bot.delete_message(chat_id=chat_id, message_id=prev_message_id)
-        except Exception as e:
-            logger.warning(f"Не удалось удалить сообщение: {e}")
-        
-        if sent_message:
-            current_page[f"{user_id}_message_id"] = sent_message.message_id
-        
-        await bot.answer_callback_query(callback_query.id)
-        
+        await bot.send_message(
+            chat_id=message.chat.id,
+            text="\n".join(result)
+        )
+
     except Exception as e:
-        logger.error(f"Ошибка при переключении страниц: {str(e)}")
-        await bot.send_message(chat_id=callback_query.from_user.id, text="⚠ Ошибка при переключении страниц.")
+        logger.error(f"Ошибка при экспорте задач: {str(e)}")
+        await bot.send_message(message.from_user.id, "⚠ Ошибка при экспорте задач.")
 
 # ======================
 # ЭКСПОРТ ЗАДАЧ В CSV
