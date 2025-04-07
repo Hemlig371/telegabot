@@ -786,106 +786,150 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
 # СПИСОК ЗАДАЧ
 # ======================
 
-@dp.message_handler(lambda message: message.text == "📤 Экспорт задач")
-async def choose_user_for_export(message: types.Message):
-    """Обработчик выбора пользователя для экспорта задач."""
+current_page = {}
+
+@dp.message_handler(lambda message: message.text == "📋 Список задач")
+async def list_tasks(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
-
+    """Просмотр списка задач с пагинацией"""
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status NOT IN ('удалено','исполнено')")
-        user_ids = cursor.fetchall()
-
-        if not user_ids:
-            await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет пользователей с задачами.")
-            return
+        user_id = message.from_user.id
+        current_page[user_id] = 0  # Сбрасываем на первую страницу при новом запросе
         
-        # Создаем клавиатуру с user_id
-        keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-        for user in user_ids:
-            keyboard.add(KeyboardButton(str(user[0])))
-
-        await bot.send_message(chat_id=message.from_user.id, text="Выберите user_id для экспорта задач:", reply_markup=keyboard)
-
+        # Отправляем первое сообщение
+        sent_message = await show_tasks_page(message, user_id, page=0)
+        
+        # Сохраняем ID сообщения для последующего редактирования
+        current_page[f"{user_id}_message_id"] = sent_message.message_id
     except Exception as e:
-        logger.error(f"Ошибка при формировании списка пользователей: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при получении списка пользователей: {str(e)}")
+        logger.error(f"Ошибка при получении списка задач: {str(e)}")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при получении списка задач.")
 
-
-@dp.message_handler(lambda message: message.text.isdigit())
-async def export_tasks(message: types.Message):
-    """Обработчик экспорта задач для выбранного пользователя."""
-    user_id = int(message.text)
-
+async def show_tasks_page(message: types.Message, user_id: int, page: int):
+    """Показать страницу с задачами и вернуть отправленное сообщение"""
     try:
         cursor = conn.cursor()
+        # Получаем общее количество задач
+        cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено')")  
+        total_tasks = cursor.fetchone()[0]
+        
+        if total_tasks == 0:
+            return await bot.send_message(message.from_user.id, "📭 У вас нет активных задач.")
+        
+        # Вычисляем общее количество страниц
+        total_pages = (total_tasks - 1) // 5
+        
+        # Проверяем, что запрашиваемая страница существует
+        if page < 0:
+            page = 0
+        elif page > total_pages:
+            page = total_pages
+        
+        # Получаем задачи для текущей страницы
         cursor.execute("""
-            SELECT id, task_text, status, deadline 
+            SELECT id, user_id, task_text, status, deadline 
             FROM tasks 
-            WHERE user_id = ? AND status NOT IN ('удалено','исполнено')
-            ORDER BY id DESC
-        """, (user_id,))
+            WHERE status NOT IN ('удалено','исполнено')
+            ORDER BY id DESC 
+            LIMIT 5 OFFSET ?
+        """, (page * 5,))
         tasks = cursor.fetchall()
 
-        if not tasks:
-            await bot.send_message(message.from_user.id, "📭 У пользователя нет активных задач.")
-            return
-
-        result = [f"📋 Список задач пользователя {user_id}:\n"]
+        # Формируем сообщение
+        result = []
         for task in tasks:
-            task_id, task_text, status, deadline = task
+            task_id, user_id, task_text, status, deadline = task
             result.append(
-                f"🔹 ID: {task_id}\n"
+                f"🔹 ID: {task_id} 👤: {user_id}\n"
                 f"📝: {task_text}\n"
                 f"🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
                 f"──────────"
             )
 
-        await bot.send_message(
+        # Создаем клавиатуру пагинации
+        keyboard = InlineKeyboardMarkup(row_width=3)
+        buttons = []
+        if page > 0:
+            buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"tasks_prev_{page-1}"))
+        
+        buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages+1}", callback_data="tasks_page"))
+        
+        if page < total_pages:
+            buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=f"tasks_next_{page+1}"))
+        
+        keyboard.row(*buttons)
+        
+        # Всегда отправляем новое сообщение
+        sent_message = await bot.send_message(
             chat_id=message.chat.id,
-            text="\n".join(result)
+            text=f"📋 Список задач (страница {page+1} из {total_pages+1}):\n\n" + "\n".join(result),
+            reply_markup=keyboard
         )
-
+        return sent_message
+        
     except Exception as e:
-        logger.error(f"Ошибка при экспорте задач: {str(e)}")
-        await bot.send_message(message.from_user.id, "⚠ Ошибка при экспорте задач.")
+        logger.error(f"Ошибка при отображении страницы задач: {str(e)}")
+        await bot.send_message(message.from_user.id, "⚠ Ошибка при отображении задач.")
+        return None
+
+@dp.callback_query_handler(lambda c: c.data.startswith(("tasks_prev_", "tasks_next_")))
+async def process_tasks_pagination(callback_query: types.CallbackQuery):
+    """Обработка переключения страниц"""
+    try:
+        user_id = callback_query.from_user.id
+        action, page = callback_query.data.split("_")[1:3]
+        page = int(page)
+        
+        # Обновляем текущую страницу
+        current_page[user_id] = page
+        
+        # Получаем chat_id из callback_query
+        chat_id = callback_query.message.chat.id
+        
+        # Создаем fake message object для передачи в show_tasks_page
+        class FakeMessage:
+            def __init__(self, chat_id):
+                self.chat = type('Chat', (), {'id': chat_id})()
+                self.from_user = type('User', (), {'id': user_id})()
+        
+        fake_message = FakeMessage(chat_id)
+        
+        # Показываем новую страницу
+        sent_message = await show_tasks_page(fake_message, user_id, page)
+
+        # Удаляем предыдущее сообщение
+        try:
+            prev_message_id = current_page.get(f"{user_id}_message_id")
+            if prev_message_id:
+                await bot.delete_message(chat_id=chat_id, message_id=prev_message_id)
+        except Exception as e:
+            logger.warning(f"Не удалось удалить сообщение: {e}")
+        
+        # Обновляем ID сообщения в хранилище
+        if sent_message:
+            current_page[f"{user_id}_message_id"] = sent_message.message_id
+        
+        await bot.answer_callback_query(callback_query.id)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при переключении страниц: {str(e)}")
+        try:
+            await bot.send_message(chat_id=callback_query.from_user.id, text="⚠ Ошибка при переключении страниц.")
+        except:
+            pass
 
 # ======================
 # ЭКСПОРТ ЗАДАЧ В CSV
 # ======================
 
 @dp.message_handler(lambda message: message.text == "📤 Экспорт задач")
-async def choose_user_for_export(message: types.Message):
+async def export_tasks_to_csv(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
-    
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status NOT IN ('удалено','исполнено')")
-        user_ids = cursor.fetchall()
-        
-        if not user_ids:
-            await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет пользователей с задачами.")
-            return
-        
-        # Создаем клавиатуру с user_id
-        keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-        for user in user_ids:
-            keyboard.add(KeyboardButton(str(user[0])))
-        
-        await bot.send_message(chat_id=message.from_user.id, text="Выберите user_id для экспорта:", reply_markup=keyboard)
-        
-    except Exception as e:
-        logger.error(f"Ошибка при формировании списка пользователей: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при получении списка пользователей: {str(e)}")
-
-@dp.message_handler(lambda message: message.text.isdigit())
-async def export_tasks_to_csv(message: types.Message):
-    user_id = message.text  # Получаем выбранный user_id
-    
+    """Экспорт всех задач в CSV файл с кодировкой win1251"""
     try:
         cursor = conn.cursor()
         cursor.execute(""" SELECT id, 
@@ -894,42 +938,62 @@ async def export_tasks_to_csv(message: types.Message):
                               status as "Статус", 
                               deadline as "Срок"
                         FROM tasks
-                        WHERE user_id = %s AND status NOT IN ('удалено','исполнено')
-                        ORDER BY id DESC""", (user_id,))
+                        WHERE status NOT IN ('удалено','исполнено')
+                        ORDER BY id DESC""")
         tasks = cursor.fetchall()
         
         if not tasks:
-            await bot.send_message(chat_id=message.from_user.id, text="📭 У данного пользователя нет задач для экспорта.")
+            await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет задач для экспорта.")
             return
 
         # Создаем CSV в памяти
         output = io.BytesIO()
-        text_buffer = io.TextIOWrapper(output, encoding='utf-8-sig', errors='replace', newline='')
-        writer = csv.writer(text_buffer, delimiter=';', quoting=csv.QUOTE_MINIMAL)
         
-        # Заголовки
+        # Используем TextIOWrapper с нужной кодировкой
+        text_buffer = io.TextIOWrapper(
+            output,
+            encoding='utf-8-sig',
+            errors='replace',  # заменяем некодируемые символы
+            newline=''
+        )
+        
+        writer = csv.writer(
+            text_buffer,
+            delimiter=';',  # Указываем нужный разделитель
+            quoting=csv.QUOTE_MINIMAL
+        )
+        
+        # Заголовки столбцов
         headers = ['ID', 'Исполнитель', 'Задача', 'Статус', 'Срок']
         writer.writerow(headers)
         
-        # Заполняем CSV
+        # Данные
         for task in tasks:
-            row = [str(item) if item is not None else '' for item in task]
+            # Преобразуем все значения в строки
+            row = [
+                str(item) if item is not None else ''
+                for item in task
+            ]
             writer.writerow(row)
         
+        # Важно: закрыть TextIOWrapper перед использованием буфера
         text_buffer.flush()
-        text_buffer.detach()
+        text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
         output.seek(0)
         
-        # Создаем файл
-        csv_file = InputFile(output, filename=f"tasks_export_{user_id}.csv")
-        await message.reply_document(document=csv_file)
+        # Создаем временный файл
+        csv_file = InputFile(output, filename="tasks_export.csv")
+        
+        await message.reply_document(
+            document=csv_file
+        )
         
     except Exception as e:
         logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
-# ЭКСПОРТ ЗАДАЧ В CSV (с исполненными)
+# ЭКСПОРТ ЗАДАЧ В CSV
 # ======================
 
 @dp.message_handler(lambda message: message.text == "📤 Экспорт (с исполненными)")
@@ -1221,7 +1285,7 @@ async def check_deadlines():
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT id, chat_id, task_text, user_id, status, deadline FROM tasks "
-                "WHERE deadline>=? AND status NOT IN ('исполнено','удалено')", 
+                "WHERE deadline<=? AND status NOT IN ('исполнено','удалено')", 
                 (now,)
             )
             tasks = cursor.fetchall()
@@ -1231,7 +1295,7 @@ async def check_deadlines():
                     # Отправляем в ЛС создателя (chat_id == user_id)
                     await bot.send_message(
                         chat_id=chat_id,
-                        text=f"⏳ Напоминание 👤{user_id} о задаче 🔹{task_id}:\n📝: {task_text}\n\n🔄: {status} ⏳: {deadline}"
+                        text=f"⏳ Напоминание 👤: {user_id} о задаче 🔹{task_id}:\n📝: {task_text}\n\n🔄: {status} ⏳: {deadline}"
                     )
                 except exceptions.BotBlocked:
                     logger.error(f"Пользователь {chat_id} заблокировал бота")
