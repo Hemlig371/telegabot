@@ -350,7 +350,7 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
     except ValueError:
         # Определяем клавиатуру в зависимости от типа чата
         reply_markup = menu_keyboard if message.chat.type == "private" else group_menu_keyboard
-        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка! Введите дату в формате YYYY-MM-DD.", reply_markup=reply_markup)
+        await bot.send_message(chat_id=message.chat.id, text="⚠ Ошибка! Введите дату в формате YYYY-MM-DD.", reply_markup=reply_markup)
         await state.finish()
 
 async def save_task(message_obj, state: FSMContext, deadline: str):
