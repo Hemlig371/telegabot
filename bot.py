@@ -1076,6 +1076,7 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
 # ======================
 
 current_page = {}
+current_filters = {}
 
 @dp.message_handler(lambda message: message.text == "📋 Список задач")
 async def list_tasks(message: types.Message):
@@ -1113,7 +1114,8 @@ async def list_tasks(message: types.Message):
 async def process_listtasks_executor(callback_query: types.CallbackQuery):
     executor = callback_query.data.split("|")[1]
     user_id = callback_query.from_user.id
-    current_page[user_id] = 0  # Сбрасываем страницу
+    current_page[user_id] = 0
+    current_filters[user_id] = executor  # Сохраняем фильтр
     sent_message = await show_tasks_page(callback_query.message, user_id, page=0, executor_filter=executor)
     current_page[f"{user_id}_message_id"] = sent_message.message_id
     await bot.answer_callback_query(callback_query.id)
@@ -1123,10 +1125,12 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
     try:
         cursor = conn.cursor()
         # Если указан фильтр по исполнителю, добавляем условие
-        if executor_filter.lower() == "none":
-            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND user_id IS NULL")
-        else:
-            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND user_id = ?", (executor_filter,))
+    if executor_filter and executor_filter.lower() == "none":
+        cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND user_id IS NULL")
+    elif executor_filter:
+        cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND user_id = ?", (executor_filter,))
+    else:
+        cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено')")
         total_tasks = cursor.fetchone()[0]
         
         if total_tasks == 0:
@@ -1182,8 +1186,8 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
         
         header = f"📋 Список задач (страница {page+1} из {total_pages+1})"
         if executor_filter:
-            header = f"📋 Задачи для 👤: <b>{str(executor_filter) if executor_filter is not None else 'Без исполнителя'}</b> (страница {page+1} из {total_pages+1})"
-        
+            executor_display = 'Без исполнителя' if str(executor_filter).lower() == 'none' else executor_filter
+            header = f"📋 Задачи для 👤: <b>{executor_display}</b> (страница {page+1} из {total_pages+1})"
         sent_message = await bot.send_message(
             chat_id=message.chat.id,
             text=header + ":\n\n" + "\n".join(result),
@@ -1205,32 +1209,28 @@ async def process_tasks_pagination(callback_query: types.CallbackQuery):
         action, page = callback_query.data.split("_")[1:3]
         page = int(page)
         
-        # Обновляем текущую страницу
+        # Получаем сохраненный фильтр
+        executor_filter = current_filters.get(user_id)
+        
         current_page[user_id] = page
         
-        # Получаем chat_id из callback_query
-        chat_id = callback_query.message.chat.id
-        
-        # Создаем fake message object для передачи в show_tasks_page
         class FakeMessage:
             def __init__(self, chat_id):
                 self.chat = type('Chat', (), {'id': chat_id})()
                 self.from_user = type('User', (), {'id': user_id})()
         
-        fake_message = FakeMessage(chat_id)
+        fake_message = FakeMessage(callback_query.message.chat.id)
         
-        # Показываем новую страницу
-        sent_message = await show_tasks_page(fake_message, user_id, page)
+        # Передаем сохраненный фильтр
+        sent_message = await show_tasks_page(fake_message, user_id, page, executor_filter)
 
-        # Удаляем предыдущее сообщение
         try:
             prev_message_id = current_page.get(f"{user_id}_message_id")
             if prev_message_id:
-                await bot.delete_message(chat_id=chat_id, message_id=prev_message_id)
+                await bot.delete_message(chat_id=callback_query.message.chat.id, message_id=prev_message_id)
         except Exception as e:
             logger.warning(f"Не удалось удалить сообщение: {e}")
         
-        # Обновляем ID сообщения в хранилище
         if sent_message:
             current_page[f"{user_id}_message_id"] = sent_message.message_id
         
@@ -1238,10 +1238,7 @@ async def process_tasks_pagination(callback_query: types.CallbackQuery):
         
     except Exception as e:
         logger.error(f"Ошибка при переключении страниц: {str(e)}")
-        try:
-            await bot.send_message(chat_id=callback_query.from_user.id, text="⚠ Ошибка при переключении страниц.")
-        except:
-            pass
+        await bot.answer_callback_query(callback_query.id, "⚠ Ошибка при переключении страниц", show_alert=False)
 
 # ======================
 # ЭКСПОРТ ЗАДАЧ В CSV
