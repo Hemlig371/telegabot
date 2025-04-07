@@ -259,30 +259,12 @@ class TaskDeletion(StatesGroup):
 # ======================
 
 @dp.message_handler(lambda message: message.text == "➕ Новая задача")
-async def new_task_start(message: types.Message, state: FSMContext):
+async def new_task_start(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
-        return
-    
-    # Сохраняем исходный chat_id и user_id
-    await state.update_data(
-        original_chat_id=message.chat.id,
-        user_id=message.from_user.id
-    )
-    
-    # Всегда продолжаем диалог в ЛС
-    if message.chat.type != "private":
-        await bot.send_message(
-            chat_id=message.from_user.id,
-            text="📌 Введите название задачи:",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-    else:
-        await bot.send_message(
-            chat_id=message.chat.id,
-            text="📌 Введите название задачи:"
-        )
-    
+        return  
+    """Начало создания задачи через кнопку меню"""
+    await bot.send_message(chat_id=message.from_user.id, text="📌 Введите название задачи:")
     await TaskCreation.waiting_for_title.set()
 
 @dp.message_handler(state=TaskCreation.waiting_for_title)
@@ -290,22 +272,33 @@ async def process_title(message: types.Message, state: FSMContext):
     """Обработка названия задачи"""
     await state.update_data(title=message.text)
     
-    # Получаем список исполнителей
+    # Получаем список последних исполнителей из БД
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
     executors = cursor.fetchall()
     
+    # Создаем клавиатуру с вариантами
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    for i in range(0, len(executors), 2):
-        row = executors[i:i+2]
-        keyboard.row(*[types.KeyboardButton(e[0]) for e in row if e[0]])
+    executor_buttons = []  # Временный список для кнопок
+    
+    for executor in executors:
+        if executor[0]:  # Пропускаем пустые значения
+            executor_buttons.append(types.KeyboardButton(executor[0]))
+            
+            # Добавляем по 2 кнопки в ряд
+            if len(executor_buttons) == 2:
+                keyboard.row(*executor_buttons)
+                executor_buttons = []
+    
+    # Добавляем оставшиеся кнопки, если их количество нечетное
+    if executor_buttons:
+        keyboard.row(*executor_buttons)
     
     await bot.send_message(
         chat_id=message.chat.id,
         text="👤 Выберите исполнителя или введите @username вручную:",
         reply_markup=keyboard
     )
-    
     await TaskCreation.waiting_for_executor.set()
 
 @dp.message_handler(state=TaskCreation.waiting_for_executor)
@@ -314,25 +307,23 @@ async def process_executor(message: types.Message, state: FSMContext):
     executor = message.text.strip()
     await state.update_data(executor=executor)
     
-    # Отправляем клавиатуру с выбором срока
+    # Убираем клавиатуру после выбора
+    remove_kb = types.ReplyKeyboardRemove()
     await bot.send_message(
         chat_id=message.chat.id,
         text="⏳ Выберите срок или введите свой:",
         reply_markup=get_deadline_keyboard(with_none_option=True)
     )
-    
     await TaskCreation.waiting_for_deadline.set()
 
 @dp.callback_query_handler(lambda c: c.data.startswith("set_deadline_"), state=TaskCreation.waiting_for_deadline)
 async def process_deadline(callback_query: types.CallbackQuery, state: FSMContext):
-    """Обработка выбора дедлайна из ЛС"""
-    user_data = await state.get_data()
-    
+    """Обработка выбора дедлайна"""
     if callback_query.data == "set_deadline_custom":
-        await bot.send_message(
-            chat_id=callback_query.from_user.id,
-            text="⏳ Введите срок в формате YYYY-MM-DD:"
-        )
+        # Сохраняем callback_query в состоянии
+        await state.update_data(callback_query=callback_query)
+        await bot.send_message(chat_id=callback_query.from_user.id, text="⏳ Введите срок в формате YYYY-MM-DD:")
+        return
     elif callback_query.data == "set_deadline_none":
         await save_task(callback_query, state, deadline=None)
     else:
@@ -341,15 +332,23 @@ async def process_deadline(callback_query: types.CallbackQuery, state: FSMContex
 
 @dp.message_handler(state=TaskCreation.waiting_for_deadline)
 async def process_custom_deadline(message: types.Message, state: FSMContext):
-    """Обработка ручного ввода срока"""
+    """Обработка ввода собственного срока"""
     try:
-        datetime.strptime(message.text, "%Y-%m-%d")
-        await save_task(message, state, message.text.strip())
+        datetime.strptime(message.text, "%Y-%m-%d")  # Проверка формата
+        
+        # Получаем сохраненный callback_query из состояния
+        user_data = await state.get_data()
+        callback_query = user_data.get('callback_query')
+        
+        if callback_query:
+            # Используем callback_query для сохранения задачи
+            await save_task(callback_query, state, message.text.strip())
+        else:
+            # Если callback_query не найден, используем message
+            await save_task(message, state, message.text.strip())
+            
     except ValueError:
-        await bot.send_message(
-            chat_id=message.chat.id,
-            text="⚠ Ошибка! Введите дату в формате YYYY-MM-DD."
-        )
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка! Введите дату в формате YYYY-MM-DD.")
         await state.finish()
 
 async def save_task(message_obj, state: FSMContext, deadline: str):
@@ -357,46 +356,49 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
     user_data = await state.get_data()
     task_text = user_data['title']
     executor = user_data['executor']
-    original_chat_id = user_data['original_chat_id']
-    user_id = user_data['user_id']
 
     try:
+        # Получаем chat_id и тип чата
+        if isinstance(message_obj, types.CallbackQuery):
+            chat_id = message_obj.from_user.id
+            chat_type = message_obj.message.chat.type
+            message_to_reply = message_obj.message
+        else:  # Это обычное сообщение (types.Message)
+            chat_id = message_obj.from_user.id
+            chat_type = message_obj.chat.type
+            message_to_reply = message_obj
+
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO tasks (user_id, chat_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-            (executor, original_chat_id, task_text, deadline)
+            (executor, chat_id, task_text, deadline)
         )
         conn.commit()
 
         response = (
             f"📌 <b>{task_text}</b>\n"
-            f"👤 {executor}\n"
-            f"⏳ {deadline if deadline else 'Без срока'}"
+            f"👤 {executor} "
         )
-        
-        # Отправляем уведомление в исходный чат
-        await bot.send_message(
-            chat_id=original_chat_id,
-            text=f"✅ Новая задача:\n{response}",
-            parse_mode=ParseMode.HTML,
-            reply_markup=group_menu_keyboard if original_chat_id != user_id else menu_keyboard
-        )
-        
-        # Дублируем в ЛС пользователя
-        if original_chat_id != user_id:
-            await bot.send_message(
-                chat_id=user_id,
-                text=f"✅ Задача создана в чате:\n{response}",
-                parse_mode=ParseMode.HTML,
-                reply_markup=menu_keyboard
-            )
+        if deadline:
+            response += f"⏳ {deadline}"
+        else:
+            response += "⏳ Без срока"
             
+        # Определяем клавиатуру в зависимости от типа чата
+        reply_markup = menu_keyboard if chat_type == "private" else group_menu_keyboard
+        
+        # Отправляем сообщение с клавиатурой
+        await bot.send_message(
+            chat_id=chat_id,
+            text=response,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
+        )
+  
     except sqlite3.Error as e:
         logger.error(f"Ошибка БД при сохранении задачи: {e}")
-        await bot.send_message(
-            chat_id=user_id,
-            text=f"⚠ Ошибка при сохранении задачи: {str(e)}"
-        )
+        reply_target = message_obj.message if isinstance(message_obj, types.CallbackQuery) else message_obj
+        await reply_target.reply(f"⚠ Ошибка при сохранении задачи: {str(e)}")
     finally:
         await state.finish()
 
