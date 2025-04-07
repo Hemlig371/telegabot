@@ -486,6 +486,7 @@ async def process_quick_task(message: types.Message, state: FSMContext):
 # ======================
 
 class StatusUpdate(StatesGroup):
+    waiting_for_executor = State()
     waiting_for_task_selection = State()
     waiting_for_status_choice = State()
 
@@ -495,15 +496,52 @@ async def status_select_task(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     """Показ списка задач для изменения статуса"""
+    
+    # Сначала получаем список уникальных исполнителей
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT DISTINCT user_id FROM tasks 
+        WHERE chat_id=? AND status<>'удалено'
+    """, (message.from_user.id,))
+    
+    executors = cursor.fetchall()
+    
+    if not executors:
+        await message.reply("❌ Нет задач для изменения статуса")
+        return
+
+    # Создаем клавиатуру с исполнителями
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    for executor, in executors:
+        keyboard.add(InlineKeyboardButton(
+            f"👤 {executor}",
+            callback_data=f"executor_for_status_{executor}"
+        ))
+    
+    keyboard.add(InlineKeyboardButton("✏️ Ввести ID задачи вручную", callback_data="status_manual_id"))
+    
+    await message.reply("Выберите исполнителя для фильтрации задач:", reply_markup=keyboard)
+    await StatusUpdate.waiting_for_executor.set()
+
+@dp.callback_query_handler(lambda c: c.data.startswith("executor_for_status_"), state=StatusUpdate.waiting_for_executor)
+async def process_executor_selection(callback_query: types.CallbackQuery, state: FSMContext):
+    executor = callback_query.data.split("_")[-1]
+    await state.update_data(executor=executor)
+    await show_filtered_tasks(callback_query.message, executor)
+    await StatusUpdate.waiting_for_task_selection.set()
+
+async def show_filtered_tasks(message_obj, executor):
+    """Показать задачи выбранного исполнителя"""
     try:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT id, task_text, status 
             FROM tasks
-            WHERE chat_id=? AND status<>'удалено'
+            WHERE chat_id=? AND user_id=? AND status<>'удалено'
             ORDER BY id DESC 
             LIMIT 5
-        """, (message.from_user.id,))
+        """, (message_obj.from_user.id, executor))
+        
         tasks = cursor.fetchall()
 
         keyboard = InlineKeyboardMarkup(row_width=1)
@@ -514,12 +552,16 @@ async def status_select_task(message: types.Message):
             ))
         
         keyboard.add(InlineKeyboardButton("✏️ Ввести ID вручную", callback_data="status_manual_id"))
-
-        await bot.send_message(chat_id=message.from_user.id, text="Выберите задачу для изменения статуса:", reply_markup=keyboard)
-        await StatusUpdate.waiting_for_task_selection.set()
+        
+        await bot.send_message(
+            chat_id=message_obj.chat.id,
+            text=f"Задачи исполнителя {executor}:",
+            reply_markup=keyboard
+        )
+        
     except Exception as e:
-        logger.error(f"Ошибка при получении списка задач: {e}")
-        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при получении списка задач")
+        logger.error(f"Ошибка при получении задач: {e}")
+        await bot.send_message(chat_id=message_obj.chat.id, text="⚠ Ошибка при получении задач")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("status_task_"), state=StatusUpdate.waiting_for_task_selection)
 async def process_selected_task_status(callback_query: types.CallbackQuery, state: FSMContext):
@@ -529,9 +571,9 @@ async def process_selected_task_status(callback_query: types.CallbackQuery, stat
     await show_status_options(callback_query.message, task_id)  # Передаем task_id
     await StatusUpdate.waiting_for_status_choice.set()
 
-@dp.callback_query_handler(lambda c: c.data == "status_manual_id", state=StatusUpdate.waiting_for_task_selection)
+@dp.callback_query_handler(lambda c: c.data == "status_manual_id", state=[StatusUpdate.waiting_for_executor, StatusUpdate.waiting_for_task_selection])
 async def ask_for_manual_id_status(callback_query: types.CallbackQuery):
-    """Запрос ручного ввода ID для изменения статуса"""
+    """Пропускаем выбор исполнителя при ручном вводе"""
     await bot.send_message(chat_id=callback_query.from_user.id, text="✏️ Введите ID задачи:")
     await StatusUpdate.waiting_for_task_selection.set()
 
