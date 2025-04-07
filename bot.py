@@ -503,6 +503,7 @@ async def status_select_task(message: types.Message):
     cursor.execute("""
         SELECT DISTINCT user_id FROM tasks 
         WHERE status<>'удалено'
+        LIMIT 20
     """)
     
     executors = cursor.fetchall()
@@ -511,14 +512,20 @@ async def status_select_task(message: types.Message):
         await message.reply("❌ Нет задач для изменения статуса")
         return
 
-    # Создаем клавиатуру с исполнителями
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    for executor, in executors:
-        keyboard.add(InlineKeyboardButton(
-            f"👤 {executor}",
-            callback_data=f"executor_for_status_{executor}"
-        ))
+    keyboard = InlineKeyboardMarkup(row_width=2)  # Устанавливаем количество кнопок в ряду
     
+    # Разбиваем исполнителей на группы по 2
+    for i in range(0, len(executors), 2):
+        row = executors[i:i+2]  # Берем группу из 2 элементов
+        row_buttons = [
+            InlineKeyboardButton(
+                f"👤 {executor}",
+                callback_data=f"executor_for_status|{executor}"
+            ) for executor in row
+        ]
+        keyboard.add(*row_buttons)  # Добавляем группу кнопок в клавиатуру
+    
+    # Добавляем кнопку для ввода ID вручную
     keyboard.add(InlineKeyboardButton("✏️ Ввести ID задачи вручную", callback_data="status_manual_id"))
     
     await message.reply("Выберите исполнителя для фильтрации задач:", reply_markup=keyboard)
@@ -526,7 +533,7 @@ async def status_select_task(message: types.Message):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("executor_for_status_"), state=StatusUpdate.waiting_for_executor)
 async def process_executor_selection(callback_query: types.CallbackQuery, state: FSMContext):
-    executor = callback_query.data.split("")[-1]
+    executor = callback_query.data.split("|")[-1]
     await state.update_data(executor=executor)
     await show_filtered_tasks(callback_query.message, executor)
     await StatusUpdate.waiting_for_task_selection.set()
