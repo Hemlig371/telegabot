@@ -542,7 +542,7 @@ async def show_filtered_tasks(message_obj, executor):
     """Показать задачи выбранного исполнителя"""
     try:
         cursor = conn.cursor()
-        if executor.lower() == "без исполнителя":  # Проверяем, ищем ли задачи без исполнителя
+        if executor.lower() == "none":  # Проверяем, ищем ли задачи без исполнителя
             cursor.execute("""
                 SELECT id, task_text, status 
                 FROM tasks
@@ -690,7 +690,7 @@ async def process_executor_filter(callback_query: types.CallbackQuery, state: FS
 async def show_executor_tasks(message_obj, executor):
     try:
         cursor = conn.cursor()
-        if executor.lower() == "без исполнителя":  # Проверяем, ищем ли задачи без исполнителя
+        if executor.lower() == "none":  # Проверяем, ищем ли задачи без исполнителя
             cursor.execute("""
                 SELECT id, task_text, status 
                 FROM tasks
@@ -822,7 +822,7 @@ async def process_deadline_filter(callback_query: types.CallbackQuery, state: FS
 async def show_deadline_tasks(message_obj, executor):
     try:
         cursor = conn.cursor()
-        if executor.lower() == "без исполнителя":  # Проверяем, ищем ли задачи без исполнителя
+        if executor.lower() == "none":  # Проверяем, ищем ли задачи без исполнителя
             cursor.execute("""
                 SELECT id, task_text, status 
                 FROM tasks
