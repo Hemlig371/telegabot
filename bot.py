@@ -1500,19 +1500,21 @@ async def process_manual_task_id_delete(message: types.Message, state: FSMContex
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
         if not cursor.fetchone():
-            await bot.send_message(chat_id=message.from_user.id, text="⚠ Задача с таким ID не найдена или не принадлежит вам!")
+            await message.reply("⚠ Задача с таким ID не найдена!")
             await state.finish()
             return
         
+        # Сохраняем task_id в состоянии и переходим в состояние подтверждения
         await state.update_data(task_id=task_id)
         await show_delete_confirmation(message, task_id)
         await TaskDeletion.waiting_for_confirmation.set()
+        
     except ValueError:
-        await bot.send_message(chat_id=message.from_user.id, text="⚠ Пожалуйста, введите числовой ID задачи!")
+        await message.reply("⚠ Пожалуйста, введите числовой ID задачи!")
         await state.finish()
     except Exception as e:
         logger.error(f"Ошибка при обработке ручного ввода ID: {e}")
-        await bot.send_message(chat_id=message.from_user.id, text="⚠ Произошла ошибка. Попробуйте снова.")
+        await message.reply("⚠ Произошла ошибка. Попробуйте снова.")
         await state.finish()
 
 @dp.callback_query_handler(lambda c: c.data.startswith("delete_task_"))
@@ -1524,6 +1526,7 @@ async def select_task_for_deletion(callback_query: types.CallbackQuery):
 
 async def show_delete_confirmation(message_obj, task_id):
     """Показать подтверждение удаления (общая функция)"""
+    await state.update_data(task_id=task_id)  # Сохраняем ID задачи
     cursor = conn.cursor()
     cursor.execute("SELECT task_text, status, deadline FROM tasks WHERE id=?", (task_id,))
     task_info = cursor.fetchone()
@@ -1561,7 +1564,7 @@ async def execute_task_deletion(callback_query: types.CallbackQuery, state: FSMC
         task = cursor.fetchone()
         
         if not task:
-            await bot.send_message(chat_id=callback_query.chat.id, text="⚠ Задача не найдена!")
+            await callback_query.answer("⚠ Задача не найдена!")
             return
             
         task_text = task[0]
@@ -1569,21 +1572,21 @@ async def execute_task_deletion(callback_query: types.CallbackQuery, state: FSMC
         cursor.execute("DELETE FROM tasks WHERE id=?", (task_id,))
         conn.commit()
         
-        # Редактируем сообщение с подтверждением
         await callback_query.message.edit_text(
             f"✅ Задача успешно удалена:\n"
             f"ID: {task_id}\n"
             f"Текст: {task_text[:100]}..."
         )
-        await state.finish()
+        await state.finish()  # Важно завершить состояние
+        
     except Exception as e:
         logger.error(f"Ошибка при удалении задачи: {e}")
-        await bot.send_message(chat_id=callback_query.from_user.id, text="⚠ Ошибка при удалении задачи!")
+        await callback_query.answer("⚠ Ошибка при удалении задачи!")
 
-@dp.callback_query_handler(lambda c: c.data == "cancel_deletion")
-async def cancel_task_deletion(callback_query: types.CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "cancel_deletion", 
+                          state=TaskDeletion.waiting_for_confirmation)
+async def cancel_task_deletion(callback_query: types.CallbackQuery, state: FSMContext):
     """Отмена удаления задачи"""
-    await bot.answer_callback_query(callback_query.id)
     await callback_query.message.edit_text("❌ Удаление отменено.")
     await state.finish()
 
