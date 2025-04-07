@@ -39,11 +39,11 @@ ALLOWED_USERS: List[str] = []
 def update_allowed_users(conn):
     global ALLOWED_USERS
     cursor = conn.cursor()
-    cursor.execute('SELECT tg_user_id FROM users')
+    cursor.execute('SELECT CAST(tg_user_id as INT) FROM users')
     ALLOWED_USERS = [row[0] for row in cursor.fetchall()]
 
 # ID администратора (может удалять задачи)
-ADMIN_ID = os.getenv('admin')
+ADMIN_ID = int(os.getenv('admin'))
 
 # Инициализация бота и диспетчера
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
