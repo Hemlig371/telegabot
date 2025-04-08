@@ -163,7 +163,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="/start", description="Старт бота"),
         BotCommand(command="/myid", description="Узнать свой ID"),
         BotCommand(command="/export3", description="Полный экспорт (админ)"),
-        BotCommand(command="/export3", description="История изменений (админ)"),
+        BotCommand(command="/export4", description="История изменений (админ)"),
         BotCommand(command="/deletetask", description="Удалить задачу (админ)"),
         BotCommand(command="/adduser", description="Добавить пользователя (админ)")
     ]
@@ -683,7 +683,13 @@ async def process_status_update(callback_query: types.CallbackQuery, state: FSMC
         _, _, task_id, new_status = callback_query.data.split("_")
         
         cursor = conn.cursor()
-        cursor.execute("UPDATE tasks SET status=? WHERE id=?", (new_status, task_id))
+        cursor.execute("""
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline)
+            SELECT id, user_id, chat_id, task_text, status, deadline 
+            FROM tasks 
+            WHERE id=?
+        """, (task_id,))
+        cursor.execute("UPDATE tasks SET status=?, chat_id=? WHERE id=?", (new_status, callback_query.from_user.id, task_id))
         conn.commit()
         
         await bot.send_message(chat_id=callback_query.from_user.id, text=f"✅ Статус задачи {task_id} изменен на '{new_status}'")
