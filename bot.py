@@ -905,7 +905,13 @@ async def process_and_save_executor(message_obj, new_executor: str, state: FSMCo
         chat_type = message_obj.chat.type
 
         cursor = conn.cursor()
-        cursor.execute("UPDATE tasks SET user_id=? WHERE id=?", (new_executor, task_id))
+        cursor.execute("""
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline)
+            SELECT id, user_id, chat_id, task_text, status, deadline 
+            FROM tasks 
+            WHERE id=?
+        """, (task_id,))
+        cursor.execute("UPDATE tasks SET user_id=?, chat_id=? WHERE id=?", (new_executor, message_obj.chat.id, task_id))
         conn.commit()
 
         reply_markup = menu_keyboard if chat_type == "private" else group_menu_keyboard
@@ -1080,13 +1086,20 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
         task_id = user_data['task_id']
         
         cursor = conn.cursor()
-        cursor.execute("UPDATE tasks SET deadline=? WHERE id=?", (new_deadline, task_id))
+        cursor.execute("""
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline)
+            SELECT id, user_id, chat_id, task_text, status, deadline 
+            FROM tasks 
+            WHERE id=?
+        """, (task_id,))
+        cursor.execute("UPDATE tasks SET deadline=?, chat_id=? WHERE id=?", (new_deadline, message.from_user.id, task_id))
         conn.commit()
         
         await bot.send_message(chat_id=message.from_user.id,text=f"✅ Новый срок установлен: {new_deadline}")
         await state.finish()
     except ValueError:
         await bot.send_message(chat_id=message.from_user.id, text="⚠ Неверный формат даты! Используйте YYYY-MM-DD")
+        await state.finish()
 
 # ======================
 # СПИСОК ЗАДАЧ
