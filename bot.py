@@ -1462,7 +1462,7 @@ async def export_tasks_to_csv3(message: types.Message):
         )
         
         # Заголовки столбцов
-        headers = ['ID', 'Исполнитель', 'ID создателя', 'Задача', 'Статус', 'Срок']
+        headers = ['ID', 'Исполнитель', 'ID создателя', 'Задача', 'Статус', 'Срок', 'ID Log']
         writer.writerow(headers)
         
         # Данные
