@@ -69,6 +69,17 @@ def init_db():
                         tg_user_id TEXT PRIMARY KEY)
                         ''')
         conn.commit()
+
+        cursor.execute('''CREATE TABLE IF NOT EXISTS tasks_log (
+                        id INTEGER,
+                        user_id TEXT,
+                        chat_id INTEGER,
+                        task_text TEXT,
+                        status TEXT,
+                        deadline TEXT,
+                        id_log INTEGER PRIMARY KEY AUTOINCREMENT)
+                        ''')
+        conn.commit()
       
         return conn
     except sqlite3.Error as e:
@@ -152,6 +163,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="/start", description="Старт бота"),
         BotCommand(command="/myid", description="Узнать свой ID"),
         BotCommand(command="/export3", description="Полный экспорт (админ)"),
+        BotCommand(command="/export3", description="История изменений (админ)"),
         BotCommand(command="/deletetask", description="Удалить задачу (админ)"),
         BotCommand(command="/adduser", description="Добавить пользователя (админ)")
     ]
@@ -223,6 +235,8 @@ async def cmd_set_deadline(message: types.Message):
 async def cmd_list_tasks(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+    if message.chat.type != "private":
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Выводить список можно только в ЛС")
         return  
     await list_tasks(message)  # Аналогично кнопке "📋 Список задач"
 
@@ -1420,6 +1434,72 @@ async def export_tasks_to_csv3(message: types.Message):
         
         # Заголовки столбцов
         headers = ['ID', 'Исполнитель', 'ID создателя', 'Задача', 'Статус', 'Срок']
+        writer.writerow(headers)
+        
+        # Данные
+        for task in tasks:
+            # Преобразуем все значения в строки
+            row = [
+                str(item) if item is not None else ''
+                for item in task
+            ]
+            writer.writerow(row)
+        
+        # Важно: закрыть TextIOWrapper перед использованием буфера
+        text_buffer.flush()
+        text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
+        output.seek(0)
+        
+        # Создаем временный файл
+        csv_file = InputFile(output, filename="tasks_export.csv")
+        
+        await message.reply_document(
+            document=csv_file
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
+        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+
+# ======================
+# ЭКСПОРТ ЗАДАЧ В CSV (история изменений)
+# ======================
+
+@dp.message_handler(commands=["export4"])
+async def export_tasks_to_csv3(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только администратор может делать полный экспорт")
+        return
+      
+    """Экспорт всех задач в CSV файл с кодировкой win1251"""
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tasks_log ORDER BY id DESC, id_log DESC")
+        tasks = cursor.fetchall()
+        
+        if not tasks:
+            await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет задач для экспорта.")
+            return
+
+        # Создаем CSV в памяти
+        output = io.BytesIO()
+        
+        # Используем TextIOWrapper с нужной кодировкой
+        text_buffer = io.TextIOWrapper(
+            output,
+            encoding='utf-8-sig',
+            errors='replace',  # заменяем некодируемые символы
+            newline=''
+        )
+        
+        writer = csv.writer(
+            text_buffer,
+            delimiter=';',  # Указываем нужный разделитель
+            quoting=csv.QUOTE_MINIMAL
+        )
+        
+        # Заголовки столбцов
+        headers = ['ID', 'Исполнитель', 'ID создателя', 'Задача', 'Статус', 'Срок', 'ID Log']
         writer.writerow(headers)
         
         # Данные
