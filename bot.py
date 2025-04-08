@@ -163,7 +163,6 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="/start", description="Старт бота"),
         BotCommand(command="/myid", description="Узнать свой ID"),
         BotCommand(command="/export3", description="Полный экспорт (админ)"),
-        BotCommand(command="/export4", description="История изменений (админ)"),
         BotCommand(command="/deletetask", description="Удалить задачу (админ)"),
         BotCommand(command="/adduser", description="Добавить пользователя (админ)")
     ]
@@ -854,7 +853,7 @@ async def process_manual_task_id_executor(message: types.Message, state: FSMCont
             if executor[0]:
                 buttons.append(InlineKeyboardButton(
                     executor[0], 
-                    callback_data=f"executor_choice_{executor[0]}"
+                    callback_data=f"executor_choice|{executor[0]}"
                 ))
         
         keyboard.add(*buttons)
@@ -1068,7 +1067,13 @@ async def process_deadline_choice(callback_query: types.CallbackQuery, state: FS
             response = f"✅ Новый срок: {new_deadline}"
         
         cursor = conn.cursor()
-        cursor.execute("UPDATE tasks SET deadline=? WHERE id=?", (new_deadline, task_id))
+        cursor.execute("""
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline)
+            SELECT id, user_id, chat_id, task_text, status, deadline 
+            FROM tasks 
+            WHERE id=?
+        """, (task_id,))
+        cursor.execute("UPDATE tasks SET deadline=?, chat_id=? WHERE id=?", (new_deadline, callback_query.from_user.id, task_id))
         conn.commit()
         
         await bot.send_message(chat_id=callback_query.from_user.id, text=response)
@@ -1343,7 +1348,7 @@ async def export_tasks_to_csv(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
-# ЭКСПОРТ ЗАДАЧ В CSV
+# ЭКСПОРТ ЗАДАЧ В CSV (с исполненными)
 # ======================
 
 @dp.message_handler(lambda message: message.text == "📤 Экспорт (с исполненными)")
@@ -1415,7 +1420,7 @@ async def export_tasks_to_csv2(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
-# ЭКСПОРТ ЗАДАЧ В CSV (с удаленными)
+# ЭКСПОРТ ЗАДАЧ В CSV (с удаленными и историей изменений)
 # ======================
 
 @dp.message_handler(commands=["export3"])
@@ -1427,7 +1432,12 @@ async def export_tasks_to_csv3(message: types.Message):
     """Экспорт всех задач в CSV файл с кодировкой win1251"""
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM tasks ORDER BY id DESC")
+        cursor.execute("""SELECT id, user_id, chat_id, task_text, status, deadline, 999999 as "id_log" 
+                          FROM tasks
+                          UNION ALL SELECT id, user_id, chat_id, task_text, status, deadline, id_log 
+                          FROM tasks_log
+                          ORDER BY id DESC, id_log DESC
+                      """)
         tasks = cursor.fetchall()
         
         if not tasks:
@@ -1453,72 +1463,6 @@ async def export_tasks_to_csv3(message: types.Message):
         
         # Заголовки столбцов
         headers = ['ID', 'Исполнитель', 'ID создателя', 'Задача', 'Статус', 'Срок']
-        writer.writerow(headers)
-        
-        # Данные
-        for task in tasks:
-            # Преобразуем все значения в строки
-            row = [
-                str(item) if item is not None else ''
-                for item in task
-            ]
-            writer.writerow(row)
-        
-        # Важно: закрыть TextIOWrapper перед использованием буфера
-        text_buffer.flush()
-        text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
-        output.seek(0)
-        
-        # Создаем временный файл
-        csv_file = InputFile(output, filename="tasks_export.csv")
-        
-        await message.reply_document(
-            document=csv_file
-        )
-        
-    except Exception as e:
-        logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
-
-# ======================
-# ЭКСПОРТ ЗАДАЧ В CSV (история изменений)
-# ======================
-
-@dp.message_handler(commands=["export4"])
-async def export_tasks_to_csv3(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только администратор может делать полный экспорт")
-        return
-      
-    """Экспорт всех задач в CSV файл с кодировкой win1251"""
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM tasks_log ORDER BY id DESC, id_log DESC")
-        tasks = cursor.fetchall()
-        
-        if not tasks:
-            await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет задач для экспорта.")
-            return
-
-        # Создаем CSV в памяти
-        output = io.BytesIO()
-        
-        # Используем TextIOWrapper с нужной кодировкой
-        text_buffer = io.TextIOWrapper(
-            output,
-            encoding='utf-8-sig',
-            errors='replace',  # заменяем некодируемые символы
-            newline=''
-        )
-        
-        writer = csv.writer(
-            text_buffer,
-            delimiter=';',  # Указываем нужный разделитель
-            quoting=csv.QUOTE_MINIMAL
-        )
-        
-        # Заголовки столбцов
-        headers = ['ID', 'Исполнитель', 'ID создателя', 'Задача', 'Статус', 'Срок', 'ID Log']
         writer.writerow(headers)
         
         # Данные
@@ -1662,6 +1606,7 @@ async def execute_task_deletion(callback_query: types.CallbackQuery, state: FSMC
         task_text = task[0]
         
         cursor.execute("DELETE FROM tasks WHERE id=?", (task_id,))
+        cursor.execute("DELETE FROM tasks_log WHERE id=?", (task_id,))
         conn.commit()
         
         # Редактируем сообщение с подтверждением
