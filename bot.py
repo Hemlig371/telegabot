@@ -491,7 +491,7 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         deadline_raw = deadline_match.group(1) if deadline_match else None
 
         task_text = task_match.group(1).strip() if task_match else None
-        executor = executor_match.group(0) if executor_match else None
+        executor = executor_match.group(0).strip() if executor_match else None
         deadline = deadline_match.group(1) if deadline_match else None
 
         # Валидация обязательного поля
