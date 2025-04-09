@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 # Конфигурация
 API_TOKEN = os.getenv('apibotkey')
-DB_PATH = "/bd1/tasks.db"
+DB_PATH = "/bd1/_tasks.db"
 
 # Список разрешенных пользователей
 ALLOWED_USERS: List[str] = []  
