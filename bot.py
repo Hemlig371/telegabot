@@ -1775,7 +1775,7 @@ async def process_remove_user(message: types.Message, state: FSMContext):
 # ======================
 
 @dp.message_handler(commands=["export4"])
-async def export_tasks_to_csv3(message: types.Message):
+async def export_users_to_csv3(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Только администратор может делать экспорт списка пользователей")
         return
@@ -1786,7 +1786,7 @@ async def export_tasks_to_csv3(message: types.Message):
         cursor.execute("SELECT tg_user_id, name, is_moderator FROM users")
         users = cursor.fetchall()
         
-        if not tasks:
+        if not users:
             await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет пользователей.")
             return
 
@@ -1816,7 +1816,7 @@ async def export_tasks_to_csv3(message: types.Message):
             # Преобразуем все значения в строки
             row = [
                 str(item) if item is not None else ''
-                for item in task
+                for item in user
             ]
             writer.writerow(row)
         
