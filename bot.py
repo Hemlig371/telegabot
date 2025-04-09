@@ -189,6 +189,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="/myid", description="Узнать свой ID"),
         BotCommand(command="/export3", description="Полный экспорт (админ)"),
         BotCommand(command="/deletetask", description="Удалить задачу (админ)"),
+        BotCommand(command="/export4", description="Список пользователей (админ)"),
         BotCommand(command="/adduser", description="Добавить пользователя (админ)"),
         BotCommand(command="/removeuser", description="Удалить пользователя (админ)")
     ]
@@ -1716,46 +1717,6 @@ async def process_user_id(message: types.Message, state: FSMContext):
     except sqlite3.Error as e:
         await message.reply("❌ Произошла ошибка при добавлении в базу данных")
 
-    # Теперь экспортируем всех пользователей в CSV файл
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT tg_user_id, name, is_moderator FROM users")
-        users = cursor.fetchall()
-    
-        # Создаем CSV в памяти
-        output = io.BytesIO()
-        
-        # Используем менеджер контекста для TextIOWrapper
-        with io.TextIOWrapper(output, encoding='utf-8-sig', errors='replace', newline='') as text_buffer:
-            writer = csv.writer(text_buffer, delimiter=';', quoting=csv.QUOTE_MINIMAL)
-            
-            # Заголовки столбцов
-            writer.writerow(['tg_user ID', 'name', 'is_moderator'])
-    
-            # Данные
-            for user in users:
-                writer.writerow([
-                    str(user[0]) if user[0] else '',
-                    str(user[1]) if user[1] else '',
-                    str(user[2]) if user[2] else ''
-                ])
-            
-            # Важно: flush, но НЕ закрываем здесь
-            text_buffer.flush()
-    
-        # После выхода из блока with TextIOWrapper автоматически "отцепляется", но BytesIO остаётся открытым
-        output.seek(0)
-    
-        # Отправляем файл
-        await message.reply_document(document=InputFile(output, filename="users_export.csv"))
-    
-    except Exception as e:
-        logger.error(f"Ошибка при экспорте пользователей: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
-    finally:
-        # Закрываем BytesIO после отправки
-        output.close()
-
     # Завершаем состояние после выполнения всех действий
     await state.finish()
 
@@ -1807,47 +1768,73 @@ async def process_remove_user(message: types.Message, state: FSMContext):
     except sqlite3.Error as e:
         await message.reply("❌ Произошла ошибка при удалении из базы данных")
     
-    # Обновляем CSV файл
+    await state.finish()
+
+# ======================
+# ЭКСПОРТ ПОЛЬЗОВАТЕЛЕЙ
+# ======================
+
+@dp.message_handler(commands=["export4"])
+async def export_tasks_to_csv3(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только администратор может делать экспорт списка пользователей")
+        return
+      
+    """Экспорт всех задач в CSV файл с кодировкой win1251"""
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT tg_user_id, name, is_moderator FROM users")
         users = cursor.fetchall()
-    
+        
+        if not tasks:
+            await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет пользователей.")
+            return
+
         # Создаем CSV в памяти
         output = io.BytesIO()
         
-        # Используем менеджер контекста для TextIOWrapper
-        with io.TextIOWrapper(output, encoding='utf-8-sig', errors='replace', newline='') as text_buffer:
-            writer = csv.writer(text_buffer, delimiter=';', quoting=csv.QUOTE_MINIMAL)
-            
-            # Заголовки столбцов
-            writer.writerow(['tg_user ID', 'name', 'is_moderator'])
-    
-            # Данные
-            for user in users:
-                writer.writerow([
-                    str(user[0]) if user[0] else '',
-                    str(user[1]) if user[1] else '',
-                    str(user[2]) if user[2] else ''
-                ])
-            
-            # Важно: flush, но НЕ закрываем здесь
-            text_buffer.flush()
-    
-        # После выхода из блока with TextIOWrapper автоматически "отцепляется", но BytesIO остаётся открытым
+        # Используем TextIOWrapper с нужной кодировкой
+        text_buffer = io.TextIOWrapper(
+            output,
+            encoding='utf-8-sig',
+            errors='replace',  # заменяем некодируемые символы
+            newline=''
+        )
+        
+        writer = csv.writer(
+            text_buffer,
+            delimiter=';',  # Указываем нужный разделитель
+            quoting=csv.QUOTE_MINIMAL
+        )
+        
+        # Заголовки столбцов
+        headers = ['tg_user_id', 'name', 'is_moderator']
+        writer.writerow(headers)
+        
+        # Данные
+        for user in users:
+            # Преобразуем все значения в строки
+            row = [
+                str(item) if item is not None else ''
+                for item in task
+            ]
+            writer.writerow(row)
+        
+        # Важно: закрыть TextIOWrapper перед использованием буфера
+        text_buffer.flush()
+        text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
         output.seek(0)
-    
-        # Отправляем файл
-        await message.reply_document(document=InputFile(output, filename="users_export.csv"))
-    
+        
+        # Создаем временный файл
+        csv_file = InputFile(output, filename="users_export.csv")
+        
+        await message.reply_document(
+            document=csv_file
+        )
+        
     except Exception as e:
-        logger.error(f"Ошибка при экспорте пользователей: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
-    finally:
-        # Закрываем BytesIO после отправки
-        output.close()
-    
-    await state.finish()
+        logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
+        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
 # ID Пользователя
