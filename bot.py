@@ -30,7 +30,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Конфигурация
-API_TOKEN = os.getenv('apibotkey')
+API_TOKEN = os.getenv('apibotkeytest')
 DB_PATH = "/bd1/_tasks.db"
 
 # Список разрешенных пользователей
