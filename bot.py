@@ -414,8 +414,8 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
 
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO tasks (user_id, chat_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-            (executor, chat_id, task_text, deadline)
+            "INSERT INTO tasks (user_id, chat_id, task_text, deadline, creator_id) VALUES (?, ?, ?, ?, ?)",
+            (executor, chat_id, task_text, deadline, chat_id)
         )
         conn.commit()
 
@@ -537,8 +537,8 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         # Сохранение в БД
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO tasks (user_id, chat_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-            (executor, message.from_user.id, task_text, deadline)
+            "INSERT INTO tasks (user_id, chat_id, task_text, deadline, creator_id) VALUES (?, ?, ?, ?, ?)",
+            (executor, message.from_user.id, task_text, deadline, message.from_user.id)
         )
         conn.commit()
 
@@ -710,8 +710,8 @@ async def process_status_update(callback_query: types.CallbackQuery, state: FSMC
         
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline)
-            SELECT id, user_id, chat_id, task_text, status, deadline 
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
+            SELECT id, user_id, chat_id, task_text, status, deadline, creator_id 
             FROM tasks 
             WHERE id=?
         """, (task_id,))
@@ -932,8 +932,8 @@ async def process_and_save_executor(message_obj, new_executor: str, state: FSMCo
 
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline)
-            SELECT id, user_id, chat_id, task_text, status, deadline 
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
+            SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
             FROM tasks 
             WHERE id=?
         """, (task_id,))
@@ -1095,8 +1095,8 @@ async def process_deadline_choice(callback_query: types.CallbackQuery, state: FS
         
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline)
-            SELECT id, user_id, chat_id, task_text, status, deadline 
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
+            SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
             FROM tasks 
             WHERE id=?
         """, (task_id,))
@@ -1119,8 +1119,8 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
         
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline)
-            SELECT id, user_id, chat_id, task_text, status, deadline 
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
+            SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
             FROM tasks 
             WHERE id=?
         """, (task_id,))
