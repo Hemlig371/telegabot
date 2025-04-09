@@ -1721,34 +1721,40 @@ async def process_user_id(message: types.Message, state: FSMContext):
         cursor = conn.cursor()
         cursor.execute("SELECT tg_user_id, name, is_moderator FROM users")
         users = cursor.fetchall()
-
+    
         # Создаем CSV в памяти
         output = io.BytesIO()
-        text_buffer = io.TextIOWrapper(output, encoding='utf-8-sig', errors='replace', newline='')
-
-        writer = csv.writer(text_buffer, delimiter=';', quoting=csv.QUOTE_MINIMAL)
         
-        # Заголовки столбцов
-        writer.writerow(['tg_user ID', 'name', 'is_moderator'])
-
-        # Данные
-        for user in users:
-            writer.writerow([
-                str(user[0]) if user[0] else '',
-                str(user[1]) if user[1] else '',
-                str(user[2]) if user[2] else ''
-             ])
-
-        text_buffer.flush()
-        text_buffer.close()  # Закрываем перед использованием BytesIO
+        # Используем менеджер контекста для TextIOWrapper
+        with io.TextIOWrapper(output, encoding='utf-8-sig', errors='replace', newline='') as text_buffer:
+            writer = csv.writer(text_buffer, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+            
+            # Заголовки столбцов
+            writer.writerow(['tg_user ID', 'name', 'is_moderator'])
+    
+            # Данные
+            for user in users:
+                writer.writerow([
+                    str(user[0]) if user[0] else '',
+                    str(user[1]) if user[1] else '',
+                    str(user[2]) if user[2] else ''
+                ])
+            
+            # Важно: flush, но НЕ закрываем здесь
+            text_buffer.flush()
+    
+        # После выхода из блока with TextIOWrapper автоматически "отцепляется", но BytesIO остаётся открытым
         output.seek(0)
-
+    
         # Отправляем файл
         await message.reply_document(document=InputFile(output, filename="users_export.csv"))
-
+    
     except Exception as e:
         logger.error(f"Ошибка при экспорте пользователей: {str(e)}", exc_info=True)
         await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+    finally:
+        # Закрываем BytesIO после отправки
+        output.close()
 
     # Завершаем состояние после выполнения всех действий
     await state.finish()
@@ -1803,31 +1809,43 @@ async def process_remove_user(message: types.Message, state: FSMContext):
     
     # Обновляем CSV файл
     try:
+        cursor = conn.cursor()
         cursor.execute("SELECT tg_user_id, name, is_moderator FROM users")
         users = cursor.fetchall()
-
+    
+        # Создаем CSV в памяти
         output = io.BytesIO()
-        text_buffer = io.TextIOWrapper(output, encoding='utf-8-sig', errors='replace', newline='')
         
-        writer = csv.writer(text_buffer, delimiter=';', quoting=csv.QUOTE_MINIMAL)
-        writer.writerow(['tg_user ID', 'name', 'is_moderator'])
-        
-        for user in users:
-            writer.writerow([
-                str(user[0]) if user[0] else '',
-                str(user[1]) if user[1] else '',
-                str(user[2]) if user[2] else ''
-            ])
-        
-        text_buffer.flush()
-        text_buffer.close()
+        # Используем менеджер контекста для TextIOWrapper
+        with io.TextIOWrapper(output, encoding='utf-8-sig', errors='replace', newline='') as text_buffer:
+            writer = csv.writer(text_buffer, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+            
+            # Заголовки столбцов
+            writer.writerow(['tg_user ID', 'name', 'is_moderator'])
+    
+            # Данные
+            for user in users:
+                writer.writerow([
+                    str(user[0]) if user[0] else '',
+                    str(user[1]) if user[1] else '',
+                    str(user[2]) if user[2] else ''
+                ])
+            
+            # Важно: flush, но НЕ закрываем здесь
+            text_buffer.flush()
+    
+        # После выхода из блока with TextIOWrapper автоматически "отцепляется", но BytesIO остаётся открытым
         output.seek(0)
-        
+    
+        # Отправляем файл
         await message.reply_document(document=InputFile(output, filename="users_export.csv"))
     
     except Exception as e:
         logger.error(f"Ошибка при экспорте пользователей: {str(e)}", exc_info=True)
         await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+    finally:
+        # Закрываем BytesIO после отправки
+        output.close()
     
     await state.finish()
 
