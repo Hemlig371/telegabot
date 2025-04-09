@@ -1459,9 +1459,9 @@ async def export_tasks_to_csv3(message: types.Message):
     """Экспорт всех задач в CSV файл с кодировкой win1251"""
     try:
         cursor = conn.cursor()
-        cursor.execute("""SELECT id, user_id, chat_id, task_text, status, deadline, 999999 as "id_log" 
+        cursor.execute("""SELECT id, creator_id, user_id, chat_id, task_text, status, deadline, 999999 as "id_log" 
                           FROM tasks
-                          UNION ALL SELECT id, user_id, chat_id, task_text, status, deadline, id_log 
+                          UNION ALL SELECT id, creator_id, user_id, chat_id, task_text, status, deadline, id_log 
                           FROM tasks_log
                           ORDER BY id DESC, id_log DESC
                       """)
@@ -1489,7 +1489,7 @@ async def export_tasks_to_csv3(message: types.Message):
         )
         
         # Заголовки столбцов
-        headers = ['ID', 'Исполнитель', 'ID создателя', 'Задача', 'Статус', 'Срок', 'ID Log']
+        headers = ['ID', 'ID создателя', 'Исполнитель', 'ID редактора', 'Задача', 'Статус', 'Срок', 'ID Log']
         writer.writerow(headers)
         
         # Данные
