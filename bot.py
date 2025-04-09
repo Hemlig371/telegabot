@@ -42,6 +42,15 @@ def update_allowed_users(conn):
     cursor.execute('SELECT CAST(tg_user_id as INT) FROM users')
     ALLOWED_USERS = [row[0] for row in cursor.fetchall()]
 
+# Список модераторов
+MODERATOR_USERS: List[str] = []  
+
+def update_moderator_users(conn):
+    global MODERATOR_USERS
+    cursor = conn.cursor()
+    cursor.execute("""SELECT CAST(tg_user_id as INT) FROM users WHERE is_moderator = 'moderator' """)
+    MODERATOR_USERS = [row[0] for row in cursor.fetchall()]
+
 # ID администратора (может удалять задачи)
 ADMIN_ID = int(os.getenv('admin'))
 
@@ -57,28 +66,43 @@ def init_db():
         
         cursor.execute('''CREATE TABLE IF NOT EXISTS tasks (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        creator_id TEXT,
                         user_id TEXT,
                         chat_id INTEGER,
                         task_text TEXT,
                         status TEXT DEFAULT 'новая',
-                        deadline TEXT)
+                        deadline TEXT,
+                        priority TEXT)
                         ''')
         conn.commit()
 
         cursor.execute('''CREATE TABLE IF NOT EXISTS users (
-                        tg_user_id TEXT PRIMARY KEY)
+                        tg_user_id TEXT PRIMARY KEY,
+                        name TEXT,
+                        is_moderator TEXT)
                         ''')
         conn.commit()
 
         cursor.execute('''CREATE TABLE IF NOT EXISTS tasks_log (
                         id INTEGER,
+                        creator_id TEXT,
                         user_id TEXT,
                         chat_id INTEGER,
                         task_text TEXT,
                         status TEXT,
                         deadline TEXT,
+                        priority TEXT,
                         id_log INTEGER PRIMARY KEY AUTOINCREMENT)
                         ''')
+
+        # Индексы при инициализации БД
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(chat_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(creator_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_deadline ON tasks(deadline)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_log_id ON tasks_log(id)')
+        
         conn.commit()
       
         return conn
@@ -88,6 +112,7 @@ def init_db():
 
 conn = init_db()
 update_allowed_users(conn)
+update_moderator_users(conn)
 
 # ======================
 # КЛАВИАТУРЫ И ИНТЕРФЕЙС
@@ -164,7 +189,8 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="/myid", description="Узнать свой ID"),
         BotCommand(command="/export3", description="Полный экспорт (админ)"),
         BotCommand(command="/deletetask", description="Удалить задачу (админ)"),
-        BotCommand(command="/adduser", description="Добавить пользователя (админ)")
+        BotCommand(command="/adduser", description="Добавить пользователя (админ)"),
+        BotCommand(command="/removeuser", description="Удалить пользователя (админ)")
     ]
     await bot.set_my_commands(commands)
 
@@ -473,7 +499,7 @@ async def quick_task_start(message: types.Message):
     """Начало быстрого создания задачи"""
     await bot.send_message(chat_id=message.from_user.id, text=
         "📝 Введите данные в формате:\n"
-        "текст задачи @исполнитель /срок"
+        "текст задачи @исполнитель //срок"
     )
     await QuickTaskCreation.waiting_for_full_data.set()
 
@@ -486,8 +512,8 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         
         # Парсим данные с помощью регулярных выражений
         task_match = re.search(r'^(.*?)(\s@|$)', text)
-        executor_match = re.search(r'(@[^/]+)', text)
-        deadline_match = re.search(r'/(\S+)', text)
+        executor_match = re.search(r'(@[^//]+)', text)
+        deadline_match = re.search(r'//(\S+)', text)
         deadline_raw = deadline_match.group(1) if deadline_match else None
 
         task_text = task_match.group(1).strip() if task_match else None
@@ -1642,83 +1668,167 @@ async def add_user_command(message: types.Message):
     
     # Переводим в состояние ожидания ID пользователя
     await AddUserState.waiting_for_user_id.set()
-    await bot.send_message(chat_id=message.from_user.id, text="⏳ Введите ID пользователя для добавления в список разрешенных:")
+    await bot.send_message(chat_id=message.from_user.id, text="Введите ID пользователя для добавления в формате:\n'user_id|name|is_moderator'\n'moderator' or NULL")
 
 @dp.message_handler(state=AddUserState.waiting_for_user_id)
 async def process_user_id(message: types.Message, state: FSMContext):
-    user_id = message.text.strip()
+    match = re.match(r'^(\d+)\|([^|]+)\|(moderator|NULL)$', message.text.strip())
+    
+    if match:
+        user_id = match.group(1)
+        user_name = match.group(2)
+        is_moderator = match.group(3).strip()
+    else:
+        await bot.send_message(chat_id=message.from_user.id, text="Строка не соответствует формату!")
+        await state.finish()
+        return
 
     if not user_id.isdigit():
-        await message.reply("❌ Введите корректный ID пользователя.")
+        await message.reply("ID пользователя должен быть числом!")
+        await state.finish()
         return
+
+    is_moderator = None if is_moderator == 'NULL' else is_moderator
 
     # Получаем подключение к базе данных из контекста
     cursor = conn.cursor()
     user_id = int(user_id)
 
+    # Проверяем, существует ли уже пользователь
+    cursor.execute("SELECT 1 FROM users WHERE tg_user_id = ?", (user_id,))
+    if cursor.fetchone():
+        await message.reply("⚠ Пользователь с таким ID уже существует!")
+        await state.finish()
+        return
+
     try:
         # Вставляем в базу данных
-        cursor.execute('INSERT INTO users (tg_user_id) VALUES (?)', (user_id,))
+        cursor.execute('INSERT INTO users (tg_user_id, name, is_moderator) VALUES (?, ?, ?)', (user_id, user_name, is_moderator))
         conn.commit()
         
         # Обновляем список разрешенных пользователей
         update_allowed_users(conn)
+        update_moderator_users(conn)
         
         # Отправляем подтверждение
-        await message.reply("✅ Пользователь успешно добавлен в список разрешенных!")
+        await message.reply("✅ Пользователь успешно добавлен!")
         
     except sqlite3.Error as e:
         await message.reply("❌ Произошла ошибка при добавлении в базу данных")
-    
+
     # Теперь экспортируем всех пользователей в CSV файл
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT tg_user_id FROM users")
+        cursor.execute("SELECT tg_user_id, name, is_moderator FROM users")
         users = cursor.fetchall()
 
         # Создаем CSV в памяти
         output = io.BytesIO()
+        text_buffer = io.TextIOWrapper(output, encoding='utf-8-sig', errors='replace', newline='')
 
-        # Используем TextIOWrapper с нужной кодировкой
-        text_buffer = io.TextIOWrapper(
-            output,
-            encoding='utf-8-sig',
-            errors='replace',  # заменяем некодируемые символы
-            newline=''
-        )
-
-        writer = csv.writer(
-            text_buffer,
-            delimiter=';',  # Указываем нужный разделитель
-            quoting=csv.QUOTE_MINIMAL
-        )
-
+        writer = csv.writer(text_buffer, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+        
         # Заголовки столбцов
-        headers = ['tg_user ID']
-        writer.writerow(headers)
+        writer.writerow(['tg_user ID', 'name', 'is_moderator'])
 
         # Данные
         for user in users:
-            row = [str(user[0]) if user[0] is not None else '']
-            writer.writerow(row)
+            writer.writerow([
+                str(user[0]) if user[0] else '',
+                str(user[1]) if user[1] else '',
+                str(user[2]) if user[2] else ''
+             ])
 
-        # Важно: закрыть TextIOWrapper перед использованием буфера
         text_buffer.flush()
-        text_buffer.detach()
+        text_buffer.close()  # Закрываем перед использованием BytesIO
         output.seek(0)
 
-        # Создаем временный файл
-        csv_file = InputFile(output, filename="users_export.csv")
-
-        await message.reply_document(
-            document=csv_file
-        )
+        # Отправляем файл
+        await message.reply_document(document=InputFile(output, filename="users_export.csv"))
 
     except Exception as e:
         logger.error(f"Ошибка при экспорте пользователей: {str(e)}", exc_info=True)
         await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
     # Завершаем состояние после выполнения всех действий
+    await state.finish()
+
+# ======================
+# Удаление Пользователя
+# ======================
+
+class RemoveUserState(StatesGroup):
+    waiting_for_user_id = State()  # Ожидаем ID пользователя
+
+@dp.message_handler(commands=["removeuser"])
+async def remove_user_command(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только администратор может удалять пользователей")
+        return
+    
+    # Переводим в состояние ожидания ID пользователя
+    await RemoveUserState.waiting_for_user_id.set()
+    await bot.send_message(chat_id=message.from_user.id, text="Введите ID пользователя для удаления:")
+
+@dp.message_handler(state=RemoveUserState.waiting_for_user_id)
+async def process_remove_user(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.reply("ID пользователя должен быть числом!")
+        await state.finish()
+        return
+
+    user_id = int(message.text)
+    cursor = conn.cursor()
+    
+    # Проверяем, существует ли пользователь
+    cursor.execute("SELECT 1 FROM users WHERE tg_user_id = ?", (user_id,))
+    if not cursor.fetchone():
+        await message.reply("⚠ Пользователь с таким ID не найден!")
+        await state.finish()
+        return
+    
+    try:
+        # Удаляем пользователя из базы
+        cursor.execute("DELETE FROM users WHERE tg_user_id = ?", (user_id,))
+        conn.commit()
+        
+        # Обновляем список разрешенных пользователей
+        update_allowed_users(conn)
+        update_moderator_users(conn)
+        
+        await message.reply("✅ Пользователь успешно удален!")
+        
+    except sqlite3.Error as e:
+        await message.reply("❌ Произошла ошибка при удалении из базы данных")
+    
+    # Обновляем CSV файл
+    try:
+        cursor.execute("SELECT tg_user_id, name, is_moderator FROM users")
+        users = cursor.fetchall()
+
+        output = io.BytesIO()
+        text_buffer = io.TextIOWrapper(output, encoding='utf-8-sig', errors='replace', newline='')
+        
+        writer = csv.writer(text_buffer, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(['tg_user ID', 'name', 'is_moderator'])
+        
+        for user in users:
+            writer.writerow([
+                str(user[0]) if user[0] else '',
+                str(user[1]) if user[1] else '',
+                str(user[2]) if user[2] else ''
+            ])
+        
+        text_buffer.flush()
+        text_buffer.close()
+        output.seek(0)
+        
+        await message.reply_document(document=InputFile(output, filename="users_export.csv"))
+    
+    except Exception as e:
+        logger.error(f"Ошибка при экспорте пользователей: {str(e)}", exc_info=True)
+        await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+    
     await state.finish()
 
 # ======================
