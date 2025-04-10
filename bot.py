@@ -579,7 +579,7 @@ async def status_select_task(message: types.Message):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT DISTINCT user_id FROM tasks 
-        WHERE status<>'удалено'
+        WHERE status NOT IN ('удалено', 'исполнено')
         LIMIT 20
     """)
     
@@ -750,7 +750,7 @@ async def executor_select_task(message: types.Message):
         return
     
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status NOT IN ('удалено', 'исполнено') LIMIT 20")
     executors = cursor.fetchall()
     
     if not executors:
@@ -785,23 +785,42 @@ async def show_executor_tasks(message_obj, executor):
     """Отображение задач выбранного исполнителя"""
     try:
         cursor = conn.cursor()
-        if executor.lower() == "none":
-            cursor.execute("""
-                SELECT id, task_text, status 
-                FROM tasks
-                WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено')
-                ORDER BY id DESC 
-                LIMIT 20
-            """)
+
+        if message_obj.chat.id in MODERATOR_USERS:
+            if executor.lower() == "none":
+                cursor.execute("""
+                    SELECT id, task_text, status 
+                    FROM tasks
+                    WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено')
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """)
+            else:
+                cursor.execute("""
+                    SELECT id, task_text, status 
+                    FROM tasks
+                    WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено')
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """, (executor,))
         else:
-            cursor.execute("""
-                SELECT id, task_text, status 
-                FROM tasks
-                WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено')
-                ORDER BY id DESC 
-                LIMIT 20
-            """, (executor,))
-        
+            if executor.lower() == "none":
+                cursor.execute("""
+                    SELECT id, task_text, status 
+                    FROM tasks
+                    WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено') AND creator_id=?
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """, (str(message_obj.chat.id),))
+            else:
+                cursor.execute("""
+                    SELECT id, task_text, status 
+                    FROM tasks
+                    WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено') AND creator_id=?
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """, (executor, str(message_obj.chat.id)))
+
         tasks = cursor.fetchall()
 
         keyboard = InlineKeyboardMarkup(row_width=1)
@@ -937,8 +956,16 @@ async def process_and_save_executor(message_obj, new_executor: str, state: FSMCo
         user_data = await state.get_data()
         task_id = user_data['task_id']
         chat_type = message_obj.chat.type
-
+      
         cursor = conn.cursor()
+
+        cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
+        task_creator = cursor.fetchone()
+        if int(task_creator[0]) != message_obj.chat.id and message_obj.chat.id not in MODERATOR_USERS:
+            await bot.send_message(chat_id=message_obj.chat.id, text="⚠ Вы не можете изменить эту задачу!")
+            await state.finish()
+            return
+          
         cursor.execute("""
             INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
             SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
@@ -978,7 +1005,7 @@ async def deadline_select_task(message: types.Message):
         return
     
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status NOT IN ('удалено', 'исполнено') LIMIT 20")
     executors = cursor.fetchall()
     
     if not executors:
@@ -1010,22 +1037,40 @@ async def process_deadline_filter(callback_query: types.CallbackQuery, state: FS
 async def show_deadline_tasks(message_obj, executor):
     try:
         cursor = conn.cursor()
-        if executor.lower() == "none":  # Проверяем, ищем ли задачи без исполнителя
-            cursor.execute("""
-                SELECT id, task_text, status 
-                FROM tasks
-                WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено')
-                ORDER BY id DESC 
-                LIMIT 20
-            """)
+        if message_obj.chat.id in MODERATOR_USERS:
+            if executor.lower() == "none":
+                cursor.execute("""
+                    SELECT id, task_text, deadline 
+                    FROM tasks
+                    WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено')
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """)
+            else:
+                cursor.execute("""
+                    SELECT id, task_text, deadline 
+                    FROM tasks
+                    WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено')
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """, (executor,))
         else:
-            cursor.execute("""
-                SELECT id, task_text, status 
-                FROM tasks
-                WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено')
-                ORDER BY id DESC 
-                LIMIT 20
-            """, (executor,))
+            if executor.lower() == "none":
+                cursor.execute("""
+                    SELECT id, task_text, deadline 
+                    FROM tasks
+                    WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено') AND creator_id=?
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """, (str(message_obj.chat.id),))
+            else:
+                cursor.execute("""
+                    SELECT id, task_text, deadline 
+                    FROM tasks
+                    WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено') AND creator_id=?
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """, (executor, str(message_obj.chat.id)))
         
         tasks = cursor.fetchall()
 
@@ -1102,6 +1147,14 @@ async def process_deadline_choice(callback_query: types.CallbackQuery, state: FS
             response = f"✅ Новый срок: {new_deadline}"
         
         cursor = conn.cursor()
+
+        cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
+        task_creator = cursor.fetchone()
+        if int(task_creator[0]) != callback_query.from_user.id and callback_query.from_user.id not in MODERATOR_USERS:
+            await bot.send_message(chat_id=callback_query.from_user.id, text="⚠ Вы не можете изменить эту задачу!")
+            await state.finish()
+            return
+          
         cursor.execute("""
             INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
             SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
@@ -1126,6 +1179,14 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
         task_id = user_data['task_id']
         
         cursor = conn.cursor()
+
+        cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
+        task_creator = cursor.fetchone()
+        if int(task_creator[0]) != message.from_user.id and message.from_user.id not in MODERATOR_USERS:
+            await bot.send_message(chat_id=message.from_user.id, text="⚠ Вы не можете изменить эту задачу!")
+            await state.finish()
+            return
+  
         cursor.execute("""
             INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
             SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
