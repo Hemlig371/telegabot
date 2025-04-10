@@ -791,7 +791,7 @@ async def show_executor_tasks(message_obj, executor, state: FSMContext):
                 AND (creator_id=? OR ? IN (SELECT user_id FROM users WHERE is_moderator='moderator'))
                 ORDER BY id DESC 
                 LIMIT 20
-            """, (str(message_obj.from_user.id), str(message_obj.from_user.id)))
+            """, message_obj.chat.id, message_obj.chat.id))
         else:
             cursor.execute("""
                 SELECT id, task_text, status 
@@ -801,11 +801,11 @@ async def show_executor_tasks(message_obj, executor, state: FSMContext):
                 AND (creator_id=? OR ? IN (SELECT user_id FROM users WHERE is_moderator='moderator'))
                 ORDER BY id DESC 
                 LIMIT 20
-            """, (executor, str(message_obj.from_user.id), str(message_obj.from_user.id)))
+            """, (executor, message_obj.chat.id, message_obj.chat.id))
         
         tasks = cursor.fetchall()
         if not tasks:
-            await bot.send_message(chat_id=message_obj.chat.id, text=f"❌ Нет задач для выбранного исполнителя {str(message_obj.from_user.id)} ")
+            await bot.send_message(chat_id=message_obj.chat.id, text="❌ Нет задач для выбранного исполнителя")
             await state.finish()
             return
 
