@@ -805,7 +805,7 @@ async def show_executor_tasks(message_obj, executor, state: FSMContext):
         
         tasks = cursor.fetchall()
         if not tasks:
-            await bot.send_message(chat_id=message_obj.chat.id, text="❌ Нет задач для выбранного исполнителя")
+            await bot.send_message(chat_id=message_obj.chat.id, text="❌ Нет задач для выбранного исполнителя {str(message_obj.from_user.id)} ")
             await state.finish()
             return
 
