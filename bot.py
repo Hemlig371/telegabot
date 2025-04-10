@@ -693,7 +693,15 @@ async def process_manual_task_id_status(message: types.Message, state: FSMContex
 async def show_status_options(message_obj, task_id):
     """Показать варианты статусов"""
     keyboard = InlineKeyboardMarkup(row_width=3)
-    statuses = ["новая", "в работе", "ожидает доклада", "исполнено", "удалено"]
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
+    task_creator = cursor.fetchone()
+    if task_creator == message_obj.chat.id or task_creator in MODERATOR_USERS:
+        statuses = ["новая", "в работе", "ожидает доклада", "исполнено", "удалено"]
+    else:
+        statuses = ["новая", "в работе", "ожидает доклада", "исполнено"]
+    
     buttons = [InlineKeyboardButton(
         status, 
         callback_data=f"set_status_{task_id}_{status}"
