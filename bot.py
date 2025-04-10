@@ -834,12 +834,6 @@ async def process_selected_task_executor(callback_query: types.CallbackQuery, st
     cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
     task = cursor.fetchone()
     
-    if callback_query.from_user.id not in MODERATOR_USERS and task[0] != callback_query.from_user.id:
-        await callback_query.answer("⚠ Вы не можете изменять эту задачу!", show_alert=True)
-        await state.finish()
-        return
-    await state.update_data(task_id=task_id)
-    
     # Получаем список исполнителей для inline-клавиатуры
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
