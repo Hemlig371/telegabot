@@ -762,7 +762,12 @@ async def executor_select_task(message: types.Message):
         return
     
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+    cursor.execute("""
+        SELECT DISTINCT user_id FROM tasks 
+        WHERE status<>'удалено' 
+        AND (creator_id=? OR ? IN (SELECT user_id FROM users WHERE is_moderator='moderator'))
+        LIMIT 20
+    """, (message.from_user.id, message.from_user.id))
     executors = cursor.fetchall()
     
     if not executors:
@@ -790,10 +795,10 @@ async def process_executor_filter(callback_query: types.CallbackQuery, state: FS
     """Обработка выбора исполнителя для фильтрации"""
     executor = callback_query.data.split("|")[-1]
     await state.update_data(executor=executor)
-    await show_executor_tasks(callback_query.message, executor)
+    await show_executor_tasks(callback_query.message, executor, state)
     await ExecutorUpdate.waiting_for_task_selection.set()
 
-async def show_executor_tasks(message_obj, executor):
+async def show_executor_tasks(message_obj, executor, state: FSMContext):
     """Отображение задач выбранного исполнителя"""
     try:
         cursor = conn.cursor()
@@ -801,20 +806,28 @@ async def show_executor_tasks(message_obj, executor):
             cursor.execute("""
                 SELECT id, task_text, status 
                 FROM tasks
-                WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено')
+                WHERE user_id IS NULL 
+                AND status NOT IN ('удалено', 'исполнено')
+                AND (creator_id=? OR ? IN (SELECT user_id FROM users WHERE is_moderator='moderator'))
                 ORDER BY id DESC 
                 LIMIT 20
-            """)
+            """, (message_obj.from_user.id, message_obj.from_user.id))
         else:
             cursor.execute("""
                 SELECT id, task_text, status 
                 FROM tasks
-                WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено')
+                WHERE user_id = ? 
+                AND status NOT IN ('удалено', 'исполнено')
+                AND (creator_id=? OR ? IN (SELECT user_id FROM users WHERE is_moderator='moderator'))
                 ORDER BY id DESC 
                 LIMIT 20
-            """, (executor,))
+            """, (executor, message_obj.from_user.id, message_obj.from_user.id))
         
         tasks = cursor.fetchall()
+        if not tasks:
+            await bot.send_message(chat_id=message_obj.chat.id, text="❌ Нет задач для выбранного исполнителя")
+            await state.finish()
+            return
 
         keyboard = InlineKeyboardMarkup(row_width=1)
         for task_id, task_text, current_executor in tasks:
@@ -831,11 +844,20 @@ async def show_executor_tasks(message_obj, executor):
         )
     except Exception as e:
         logger.error(f"Ошибка при получении задач: {e}")
+        await state.finish()
 
 @dp.callback_query_handler(lambda c: c.data.startswith("executor_task_"), state=ExecutorUpdate.waiting_for_task_selection)
 async def process_selected_task_executor(callback_query: types.CallbackQuery, state: FSMContext):
     """Обработка выбранной задачи"""
     task_id = callback_query.data.split("_")[2]
+    cursor = conn.cursor()
+    cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
+    task = cursor.fetchone()
+    
+    if callback_query.from_user.id not in MODERATOR_USERS and task[0] != callback_query.from_user.id:
+        await callback_query.answer("⚠ Вы не можете изменять эту задачу!", show_alert=True)
+        await state.finish()
+        return
     await state.update_data(task_id=task_id)
     
     # Получаем список исполнителей для inline-клавиатуры
@@ -882,9 +904,14 @@ async def process_manual_task_id_executor(message: types.Message, state: FSMCont
     try:
         task_id = int(message.text)
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
-        if not cursor.fetchone():
+        cursor.execute("SELECT id, creator_id FROM tasks WHERE id=?", (task_id,))
+        task = cursor.fetchone()
+        if not task:
             await bot.send_message(chat_id=message.from_user.id, text="⚠ Задача не найдена!")
+            return
+        
+        if message.from_user.id not in MODERATOR_USERS and task[1] != message.from_user.id:
+            await bot.send_message(chat_id=message.from_user.id, text="⚠ Вы не можете изменять эту задачу!")
             await state.finish()
             return
         
@@ -951,6 +978,14 @@ async def process_and_save_executor(message_obj, new_executor: str, state: FSMCo
         chat_type = message_obj.chat.type
 
         cursor = conn.cursor()
+      
+        cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
+        task = cursor.fetchone()
+        if message_obj.from_user.id not in MODERATOR_USERS and task[0] != message_obj.from_user.id:
+            await message_obj.reply("⚠ Вы не можете изменять эту задачу!")
+            await state.finish()
+            return
+      
         cursor.execute("""
             INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
             SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
@@ -990,7 +1025,12 @@ async def deadline_select_task(message: types.Message):
         return
     
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+    cursor.execute("""
+        SELECT DISTINCT user_id FROM tasks 
+        WHERE status<>'удалено' 
+        AND (creator_id=? OR ? IN (SELECT user_id FROM users WHERE is_moderator='moderator'))
+        LIMIT 20
+    """, (message.from_user.id, message.from_user.id))
     executors = cursor.fetchall()
     
     if not executors:
@@ -1016,30 +1056,38 @@ async def deadline_select_task(message: types.Message):
 async def process_deadline_filter(callback_query: types.CallbackQuery, state: FSMContext):
     executor = callback_query.data.split("|")[-1]
     await state.update_data(executor=executor)
-    await show_deadline_tasks(callback_query.message, executor)
+    await show_deadline_tasks(callback_query.message, executor, state)
     await TaskUpdate.waiting_for_task_selection.set()
 
-async def show_deadline_tasks(message_obj, executor):
+async def show_deadline_tasks(message_obj, executor, state: FSMContext):
     try:
         cursor = conn.cursor()
-        if executor.lower() == "none":  # Проверяем, ищем ли задачи без исполнителя
+        if executor.lower() == "none":
             cursor.execute("""
                 SELECT id, task_text, status 
                 FROM tasks
-                WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено')
+                WHERE user_id IS NULL 
+                AND status NOT IN ('удалено', 'исполнено')
+                AND (creator_id=? OR ? IN (SELECT user_id FROM users WHERE is_moderator='moderator'))
                 ORDER BY id DESC 
                 LIMIT 20
-            """)
+            """, (message_obj.from_user.id, message_obj.from_user.id))
         else:
             cursor.execute("""
                 SELECT id, task_text, status 
                 FROM tasks
-                WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено')
+                WHERE user_id = ? 
+                AND status NOT IN ('удалено', 'исполнено')
+                AND (creator_id=? OR ? IN (SELECT user_id FROM users WHERE is_moderator='moderator'))
                 ORDER BY id DESC 
                 LIMIT 20
-            """, (executor,))
+            """, (executor, message_obj.from_user.id, message_obj.from_user.id))
         
         tasks = cursor.fetchall()
+        if not tasks:
+            await bot.send_message(chat_id=message_obj.chat.id, text="❌ Нет задач для выбранного исполнителя")
+            await state.finish()
+            return
 
         keyboard = InlineKeyboardMarkup(row_width=1)
         for task_id, task_text, deadline in tasks:
@@ -1056,11 +1104,21 @@ async def show_deadline_tasks(message_obj, executor):
         )
     except Exception as e:
         logger.error(f"Ошибка при получении задач: {e}")
+        await state.finish()
 
 @dp.callback_query_handler(lambda c: c.data.startswith("deadline_task_"), state=TaskUpdate.waiting_for_task_selection)
 async def process_selected_task(callback_query: types.CallbackQuery, state: FSMContext):
     """Обработка выбранной задачи"""
     task_id = callback_query.data.split("_")[-1]
+    cursor = conn.cursor()
+    cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
+    task = cursor.fetchone()
+    
+    if callback_query.from_user.id not in MODERATOR_USERS and task[0] != callback_query.from_user.id:
+        await callback_query.answer("⚠ Вы не можете изменять эту задачу!", show_alert=True)
+        await state.finish()
+        return
+    
     await state.update_data(task_id=task_id)
     await show_deadline_options(callback_query.message)
     await TaskUpdate.waiting_for_deadline_choice.set()
@@ -1079,11 +1137,17 @@ async def process_manual_task_id(message: types.Message, state: FSMContext):
     try:
         task_id = int(message.text)
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
-        if not cursor.fetchone():
+        cursor.execute("SELECT id, creator_id FROM tasks WHERE id=?", (task_id,))
+        task = cursor.fetchone()
+        if not task:
             await bot.send_message(chat_id=message.from_user.id, text="⚠ Задача не найдена!")
             return
         
+        if message.from_user.id not in MODERATOR_USERS and task[1] != message.from_user.id:
+            await bot.send_message(chat_id=message.from_user.id, text="⚠ Вы не можете изменять эту задачу!")
+            await state.finish()
+            return
+
         await state.update_data(task_id=task_id)
         await show_deadline_options(message)
         await TaskUpdate.waiting_for_deadline_choice.set()
@@ -1114,6 +1178,14 @@ async def process_deadline_choice(callback_query: types.CallbackQuery, state: FS
             response = f"✅ Новый срок: {new_deadline}"
         
         cursor = conn.cursor()
+      
+        cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
+        task = cursor.fetchone()
+        if callback_query.from_user.id not in MODERATOR_USERS and task[0] != callback_query.from_user.id:
+            await callback_query.answer("⚠ Вы не можете изменять эту задачу!", show_alert=True)
+            await state.finish()
+            return
+          
         cursor.execute("""
             INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
             SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
@@ -1138,6 +1210,14 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
         task_id = user_data['task_id']
         
         cursor = conn.cursor()
+      
+        cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
+        task = cursor.fetchone()
+        if message.from_user.id not in MODERATOR_USERS and task[0] != message.from_user.id:
+            await message.reply("⚠ Вы не можете изменять эту задачу!")
+            await state.finish()
+            return
+          
         cursor.execute("""
             INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
             SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
