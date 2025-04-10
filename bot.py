@@ -961,7 +961,7 @@ async def process_and_save_executor(message_obj, new_executor: str, state: FSMCo
       
         cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
         task = cursor.fetchone()
-        if message_obj.from_user.id not in MODERATOR_USERS and task[0] != message_obj.from_user.id:
+        if message_obj.chat.id not in MODERATOR_USERS and task[0] != message_obj.chat.id:
             await message_obj.reply("⚠ Вы не можете изменять эту задачу!")
             await state.finish()
             return
