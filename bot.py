@@ -747,7 +747,7 @@ async def executor_select_task(message: types.Message):
         WHERE status<>'удалено' 
         AND (creator_id=? OR ? IN (SELECT user_id FROM users WHERE is_moderator='moderator'))
         LIMIT 20
-    """, (message.from_user.id, message.from_user.id))
+    """, (str(message.from_user.id), str(message.from_user.id)))
     executors = cursor.fetchall()
     
     if not executors:
@@ -791,7 +791,7 @@ async def show_executor_tasks(message_obj, executor, state: FSMContext):
                 AND (creator_id=? OR ? IN (SELECT user_id FROM users WHERE is_moderator='moderator'))
                 ORDER BY id DESC 
                 LIMIT 20
-            """, (message_obj.from_user.id, message_obj.from_user.id))
+            """, ((str(message_obj.from_user.id), str(message_obj.from_user.id)))
         else:
             cursor.execute("""
                 SELECT id, task_text, status 
@@ -801,7 +801,7 @@ async def show_executor_tasks(message_obj, executor, state: FSMContext):
                 AND (creator_id=? OR ? IN (SELECT user_id FROM users WHERE is_moderator='moderator'))
                 ORDER BY id DESC 
                 LIMIT 20
-            """, (executor, message_obj.from_user.id, message_obj.from_user.id))
+            """, (executor, str(message_obj.from_user.id), str(message_obj.from_user.id)))
         
         tasks = cursor.fetchall()
         if not tasks:
@@ -1010,7 +1010,7 @@ async def deadline_select_task(message: types.Message):
         WHERE status<>'удалено' 
         AND (creator_id=? OR ? IN (SELECT user_id FROM users WHERE is_moderator='moderator'))
         LIMIT 20
-    """, (message.from_user.id, message.from_user.id))
+    """, (str(message.from_user.id), str(message.from_user.id)))
     executors = cursor.fetchall()
     
     if not executors:
@@ -1051,7 +1051,7 @@ async def show_deadline_tasks(message_obj, executor, state: FSMContext):
                 AND (creator_id=? OR ? IN (SELECT user_id FROM users WHERE is_moderator='moderator'))
                 ORDER BY id DESC 
                 LIMIT 20
-            """, (message_obj.from_user.id, message_obj.from_user.id))
+            """, (str(message_obj.from_user.id), str(message_obj.from_user.id)))
         else:
             cursor.execute("""
                 SELECT id, task_text, status 
@@ -1061,7 +1061,7 @@ async def show_deadline_tasks(message_obj, executor, state: FSMContext):
                 AND (creator_id=? OR ? IN (SELECT user_id FROM users WHERE is_moderator='moderator'))
                 ORDER BY id DESC 
                 LIMIT 20
-            """, (executor, message_obj.from_user.id, message_obj.from_user.id))
+            """, (executor, str(message_obj.from_user.id), str(message_obj.from_user.id)))
         
         tasks = cursor.fetchall()
         if not tasks:
