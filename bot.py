@@ -123,10 +123,11 @@ menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 menu_keyboard.add(
     KeyboardButton("➕ Новая задача"),
     KeyboardButton("⚡ Быстрая задача"),
-    KeyboardButton("📋 Список задач"),
     KeyboardButton("🔄 Изменить статус"),
+    KeyboardButton("📋 Список задач"),
     KeyboardButton("👤 Изменить исполнителя"),
     KeyboardButton("⏳ Изменить срок"),
+    KeyboardButton("📋 Список (по сроку)"),
     KeyboardButton("📤 Экспорт задач"),
     KeyboardButton("📤 Экспорт (с исполненными)")
 )
@@ -183,8 +184,9 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="/setexecutor", description="Изменить исполнителя"),
         BotCommand(command="/setdeadline", description="Изменить срок"),
         BotCommand(command="/listtasks", description="Список задач"),
+        BotCommand(command="/listtasksdate", description="Список (по сроку)"),
         BotCommand(command="/export", description="Экспорт в CSV"),
-        BotCommand(command="/export2", description="Экспорт с исполненными"),
+        BotCommand(command="/export2", description="Экспорт (с исполненными)"),
         BotCommand(command="/start", description="Старт бота"),
         BotCommand(command="/myid", description="Узнать свой ID"),
         BotCommand(command="/export3", description="Полный экспорт (админ)"),
@@ -265,6 +267,15 @@ async def cmd_list_tasks(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Выводить список можно только в ЛС")
         return  
     await list_tasks(message)  # Аналогично кнопке "📋 Список задач"
+
+@dp.message_handler(commands=["listtasksdate"])
+async def cmd_list_tasks_date(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+    if message.chat.type != "private":
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Выводить список можно только в ЛС")
+        return  
+    await list_tasks_by_deadline(message)  # Аналогично кнопке "📋 Список (по сроку)"
 
 @dp.message_handler(commands=["export"])
 async def cmd_export_tasks(message: types.Message):
@@ -1364,6 +1375,180 @@ async def process_tasks_pagination(callback_query: types.CallbackQuery):
         
         if sent_message:
             current_page[f"{user_id}_message_id"] = sent_message.message_id
+        
+        await bot.answer_callback_query(callback_query.id)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при переключении страниц: {str(e)}")
+        await bot.answer_callback_query(callback_query.id, "⚠ Ошибка при переключении страниц", show_alert=False)
+
+# ======================
+# СПИСОК ЗАДАЧ (по сроку)
+# ======================
+
+current_page_deadline = {}
+current_filters_deadline = {}
+
+@dp.message_handler(lambda message: message.text == "📋 Список (по сроку)")
+async def list_tasks_by_deadline(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+        return  
+    """Просмотр списка задач с выбором срока и пагинацией"""
+    try:
+        cursor = conn.cursor()
+        # Получаем уникальные сроки. Если срок отсутствует (NULL), то можно отобразить вариант "Без срока"
+        cursor.execute("""
+            SELECT DISTINCT deadline FROM tasks 
+            WHERE status NOT IN ('удалено', 'исполнено')
+            ORDER BY deadline ASC
+            LIMIT 20
+        """)
+        deadlines = cursor.fetchall()
+        if not deadlines:
+            await message.reply("❌ Нет задач для отображения")
+            return
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        for i in range(0, len(deadlines), 2):
+            row = deadlines[i:i+2]
+            row_buttons = []
+            for d in row:
+                if d[0]:
+                    btn_text = d[0]
+                    btn_data = d[0]
+                else:
+                    btn_text = "Без срока"
+                    btn_data = "none"
+                row_buttons.append(InlineKeyboardButton(
+                    f"⏳ {btn_text}",
+                    callback_data=f"listtasks_deadline|{btn_data}"
+                ))
+            keyboard.add(*row_buttons)
+        keyboard.add(InlineKeyboardButton("✏️ Ввести дату вручную", callback_data="deadline_manual_id"))
+        await message.reply("Выберите срок для фильтрации задач:", reply_markup=keyboard)
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка сроков: {str(e)}")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при получении списка задач.")
+
+@dp.callback_query_handler(lambda c: c.data.startswith("listtasks_deadline|"))
+async def process_listtasks_deadline(callback_query: types.CallbackQuery):
+    deadline_filter = callback_query.data.split("|")[1]
+    user_id = callback_query.from_user.id
+    current_page_deadline[user_id] = 0
+    current_filters_deadline[user_id] = deadline_filter  # Сохраняем выбранный срок
+    sent_message = await show_tasks_page_by_deadline(callback_query.message, user_id, page=0, deadline_filter=deadline_filter)
+    current_page_deadline[f"{user_id}_message_id"] = sent_message.message_id
+    await bot.answer_callback_query(callback_query.id)
+
+async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page: int, deadline_filter: str = None):
+    try:
+        cursor = conn.cursor()
+        # Если выбран конкретный срок, считаем задачи с этим сроком.
+        # Если выбран вариант "Без срока" (deadline_filter == "none"), ищем записи с deadline IS NULL.
+        if deadline_filter and deadline_filter.lower() == "none":
+            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND deadline IS NULL")
+        elif deadline_filter:
+            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND deadline = ?", (deadline_filter,))
+        else:
+            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено')")
+        total_tasks = cursor.fetchone()[0]
+        
+        if total_tasks == 0:
+            return await bot.send_message(message.chat.id, "📭 Нет активных задач.")
+        
+        total_pages = (total_tasks - 1) // 10
+        page = max(0, min(page, total_pages))
+        
+        # Получаем задачи с применённой фильтрацией по сроку
+        if deadline_filter:
+            if deadline_filter.lower() == "none":
+                cursor.execute("""
+                    SELECT id, user_id, task_text, status, deadline 
+                    FROM tasks 
+                    WHERE status NOT IN ('удалено','исполнено') AND deadline IS NULL
+                    ORDER BY id DESC 
+                    LIMIT 10 OFFSET ?
+                """, (page * 10,))
+            else:
+                cursor.execute("""
+                    SELECT id, user_id, task_text, status, deadline 
+                    FROM tasks 
+                    WHERE status NOT IN ('удалено','исполнено') AND deadline = ?
+                    ORDER BY id DESC 
+                    LIMIT 10 OFFSET ?
+                """, (deadline_filter, page * 10))
+        else:
+            cursor.execute("""
+                SELECT id, user_id, task_text, status, deadline 
+                FROM tasks 
+                WHERE status NOT IN ('удалено','исполнено')
+                ORDER BY id DESC 
+                LIMIT 10 OFFSET ?
+            """, (page * 10,))
+        tasks = cursor.fetchall()
+
+        result = []
+        for task in tasks:
+            task_id, task_user, task_text, status, deadline = task
+            result.append(
+                f"🔹: {task_id} 📝: {task_text}\n\n"
+                f"🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
+                f"──────────"
+            )
+        keyboard = InlineKeyboardMarkup(row_width=3)
+        buttons = []
+        if page > 0:
+            buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"tasks_prev_{page-1}"))
+        buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages+1}", callback_data="tasks_page"))
+        if page < total_pages:
+            buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=f"tasks_next_{page+1}"))
+        keyboard.row(*buttons)
+        
+        header = f"📋 Список задач (страница {page+1} из {total_pages+1})"
+        if deadline_filter:
+            deadline_display = 'Без срока' if deadline_filter.lower() == 'none' else deadline_filter
+            header = f"📋 Задачи со сроком: <b>{deadline_display}</b> (страница {page+1} из {total_pages+1})"
+        sent_message = await bot.send_message(
+            chat_id=message.chat.id,
+            text=header + ":\n\n" + "\n".join(result),
+            reply_markup=keyboard,
+            parse_mode=ParseMode.HTML
+        )
+        return sent_message
+        
+    except Exception as e:
+        logger.error(f"Ошибка при отображении страницы задач: {str(e)}")
+        await bot.send_message(message.from_user.id, "⚠ Ошибка при отображении задач.")
+        return None
+
+@dp.callback_query_handler(lambda c: c.data.startswith(("tasks_prev_", "tasks_next_")))
+async def process_tasks_pagination_deadline(callback_query: types.CallbackQuery):
+    """Обработка переключения страниц для фильтрации по сроку"""
+    try:
+        user_id = callback_query.from_user.id
+        action, page = callback_query.data.split("_")[1:3]
+        page = int(page)
+        
+        deadline_filter = current_filters_deadline.get(user_id)
+        current_page_deadline[user_id] = page
+        
+        class FakeMessage:
+            def __init__(self, chat_id):
+                self.chat = type('Chat', (), {'id': chat_id})()
+                self.from_user = type('User', (), {'id': user_id})()
+        
+        fake_message = FakeMessage(callback_query.message.chat.id)
+        sent_message = await show_tasks_page_by_deadline(fake_message, user_id, page, deadline_filter)
+        
+        try:
+            prev_message_id = current_page_deadline.get(f"{user_id}_message_id")
+            if prev_message_id:
+                await bot.delete_message(chat_id=callback_query.message.chat.id, message_id=prev_message_id)
+        except Exception as e:
+            logger.warning(f"Не удалось удалить сообщение: {e}")
+        
+        if sent_message:
+            current_page_deadline[f"{user_id}_message_id"] = sent_message.message_id
         
         await bot.answer_callback_query(callback_query.id)
         
