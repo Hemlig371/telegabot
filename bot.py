@@ -434,15 +434,17 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
         cursor.execute("SELECT tg_user_id FROM users WHERE username=?",(executor,))
         username = cursor.fetchone()
 
+        cursor.execute("SELECT name FROM users WHERE creator_id=?",(chat_id,))
+        creator = cursor.fetchone()
+
         response = (
             f"📌 <b>{task_text}</b>\n"
             f"👤 {executor} "
         )
 
         response2 = (
-            f"🔔 Вам назначена новая задача:\n"
+            f"🔔 Вам назначена новая задача от {creator[0]}:\n"
             f"📌 <b>{task_text}</b>\n"
-            f"👤 {executor} "
         )
         if deadline:
             response += f"⏳ {deadline}"
@@ -574,15 +576,18 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         cursor.execute("SELECT tg_user_id FROM users WHERE username=?",(executor,))
         username = cursor.fetchone()
 
+        cursor.execute("SELECT name FROM users WHERE creator_id=?",(chat_id,))
+        creator = cursor.fetchone()
+
         response = (
             f"📌 <b>{task_text}</b>\n"
             f"👤 {executor if executor else 'не указан'} ⏳ {deadline if deadline else 'не указан'}"
         )
 
         response2 = (
-            f"🔔 Вам назначена новая задача:\n"
+            f"🔔 Вам назначена новая задача от {creator[0]}:\n"
             f"📌 <b>{task_text}</b>\n"
-            f"👤 {executor if executor else 'не указан'} ⏳ {deadline if deadline else 'не указан'}"
+            f"⏳ {deadline if deadline else 'не указан'}"
         )
           
         await bot.send_message(chat_id=message.from_user.id, text=response)
