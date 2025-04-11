@@ -461,7 +461,7 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
-        if not username[0] is None:
+        if username is not None and username[0] is not None:
             await bot.send_message(
                 chat_id=username[0],
                 text=response2,
@@ -587,7 +587,7 @@ async def process_quick_task(message: types.Message, state: FSMContext):
           
         await bot.send_message(chat_id=message.from_user.id, text=response)
 
-        if not username[0] is None:
+        if username is not None and username[0] is not None:
           await bot.send_message(
               chat_id=username[0],
               text=response2
