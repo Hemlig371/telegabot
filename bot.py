@@ -368,6 +368,7 @@ async def process_title(message: types.Message, state: FSMContext):
         text="👤 Выберите исполнителя или введите @username вручную:",
         reply_markup=keyboard
     )
+    await state.update_data(title=message.text)
     await TaskCreation.waiting_for_executor.set()
 
 @dp.callback_query_handler(lambda c: c.data.startswith("executor_select|"), state=TaskCreation.waiting_for_executor)
