@@ -125,20 +125,21 @@ menu_keyboard.add(
     KeyboardButton("➕ Новая задача"),
     KeyboardButton("⚡ Быстрая задача"),
     KeyboardButton("🔄 Изменить статус"),
-    KeyboardButton("📋 Список задач"),
     KeyboardButton("👤 Изменить исполнителя"),
     KeyboardButton("⏳ Изменить срок"),
+    KeyboardButton("📋 Список задач"),
     KeyboardButton("📋 Список (по сроку)"),
     KeyboardButton("📤 Экспорт задач"),
-    KeyboardButton("📤 Экспорт (с исполненными)")
+    KeyboardButton("📤 Экспорт (с исполненными)"),
+    KeyboardButton("⛔ Отмена")
 )
 
 # Клавиатура для групповых чатов
 group_menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 group_menu_keyboard.add(
     KeyboardButton("⚡ Быстрая задача"),
-    KeyboardButton("➕ Новая задача"),
-    KeyboardButton("📤 Экспорт задач")
+    KeyboardButton("📤 Экспорт задач"),
+    KeyboardButton("⛔ Отмена")
 )
 
 # Клавиатура выбора даты
@@ -189,6 +190,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="/export", description="Экспорт в CSV"),
         BotCommand(command="/export2", description="Экспорт (с исполненными)"),
         BotCommand(command="/start", description="Старт бота"),
+        BotCommand(command="/cancel", description="Отмена текущего действия"),
         BotCommand(command="/myid", description="Узнать свой ID"),
         BotCommand(command="/export3", description="Полный экспорт (админ)"),
         BotCommand(command="/deletetask", description="Удалить задачу (админ)"),
@@ -206,12 +208,12 @@ async def start_command(message: types.Message):
 
     if message.chat.type == "private":
         await bot.send_message(chat_id=message.chat.id, text=
-            "👋 Привет! Я бот для управления задачами. Выберите команду:",
+            "Выберите команду:",
             reply_markup=menu_keyboard
         )
     else:
         await bot.send_message(chat_id=message.chat.id, text=
-            "👋 Привет! Я бот для управления задачами. Выберите команду:",
+            "Выберите команду:",
             reply_markup=group_menu_keyboard
         )
 
@@ -292,6 +294,13 @@ async def cmd_export_tasks(message: types.Message):
         return  
     await export_tasks_to_csv2(message)  # Аналогично кнопке "📤 Экспорт (с исполненными)"
 
+@dp.message_handler(commands=["cancel"])
+async def cmd_new_task(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+        return  
+    await cancel_handler(message)  # Тот же обработчик, что и для кнопки "⛔ Отмена"
+
 # ======================
 # СОСТОЯНИЯ БОТА
 # ======================
@@ -305,6 +314,17 @@ class TaskDeletion(StatesGroup):
     waiting_for_task_selection = State()
     waiting_for_confirmation = State()
     waiting_for_manual_id = State()
+
+@dp.message_handler(lambda message: message.text == "⛔ Отмена", state='*')
+async def cancel_handler(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+        return  
+      
+    current_state = await state.get_state()
+    if current_state:
+        await state.finish()
+    await message.reply("Действие отменено. Возвращаемся к стартовому меню.", reply_markup=menu_keyboard)
 
 # ======================
 # СОЗДАНИЕ ЗАДАЧ
