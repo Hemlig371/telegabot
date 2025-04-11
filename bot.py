@@ -79,6 +79,7 @@ def init_db():
         cursor.execute('''CREATE TABLE IF NOT EXISTS users (
                         tg_user_id TEXT PRIMARY KEY,
                         name TEXT,
+                        username TEXT,
                         is_moderator TEXT)
                         ''')
         conn.commit()
@@ -430,7 +431,20 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
         )
         conn.commit()
 
+        cursor.execute("SELECT tg_user_id FROM users WHERE username=?",(executor,))
+        username = cursor.fetchone()
+
         response = (
+            f"📌 <b>{task_text}</b>\n"
+            f"👤 {executor} "
+        )
+        if deadline:
+            response += f"⏳ {deadline}"
+        else:
+            response += "⏳ Без срока"
+
+        response2 = (
+            f"🔔 Вам назначена новая задача:\n"
             f"📌 <b>{task_text}</b>\n"
             f"👤 {executor} "
         )
@@ -449,6 +463,12 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
+        if not username[0] is None
+            await bot.send_message(
+                chat_id=username[0],
+                text=response2,
+                parse_mode=ParseMode.HTML
+            )
   
     except sqlite3.Error as e:
         logger.error(f"Ошибка БД при сохранении задачи: {e}")
@@ -1923,16 +1943,17 @@ async def add_user_command(message: types.Message):
     
     # Переводим в состояние ожидания ID пользователя
     await AddUserState.waiting_for_user_id.set()
-    await bot.send_message(chat_id=message.from_user.id, text="Введите ID пользователя для добавления в формате:\n'user_id|name|is_moderator'\n'moderator' or NULL")
+    await bot.send_message(chat_id=message.from_user.id, text="Введите ID пользователя для добавления в формате:\n'user_id|name|is_moderator|username'\n'moderator'/'username' могут быть пустыми")
 
 @dp.message_handler(state=AddUserState.waiting_for_user_id)
 async def process_user_id(message: types.Message, state: FSMContext):
-    match = re.match(r'^(\d+)\|([^|]+)\|(moderator|NULL)$', message.text.strip())
+    match = re.match(r'^(\d+)\|([^|]+)(?:\|(moderator))?(?:\|(.+))?$', message.text.strip())
     
     if match:
         user_id = match.group(1)
         user_name = match.group(2)
-        is_moderator = match.group(3).strip()
+        is_moderator = match.group(3)
+        username = (match.group(4) or "").strip()
     else:
         await bot.send_message(chat_id=message.from_user.id, text="Строка не соответствует формату!")
         await state.finish()
@@ -1958,7 +1979,7 @@ async def process_user_id(message: types.Message, state: FSMContext):
 
     try:
         # Вставляем в базу данных
-        cursor.execute('INSERT INTO users (tg_user_id, name, is_moderator) VALUES (?, ?, ?)', (user_id, user_name, is_moderator))
+        cursor.execute('INSERT INTO users (tg_user_id, name, is_moderator, username) VALUES (?, ?, ?, ?)', (user_id, user_name, is_moderator, username))
         conn.commit()
         
         # Обновляем список разрешенных пользователей
@@ -2037,7 +2058,7 @@ async def export_users_to_csv3(message: types.Message):
     """Экспорт всех задач в CSV файл с кодировкой win1251"""
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT tg_user_id, name, is_moderator FROM users")
+        cursor.execute("SELECT tg_user_id, name, username, is_moderator FROM users")
         users = cursor.fetchall()
         
         if not users:
@@ -2062,7 +2083,7 @@ async def export_users_to_csv3(message: types.Message):
         )
         
         # Заголовки столбцов
-        headers = ['tg_user_id', 'name', 'is_moderator']
+        headers = ['tg_user_id', 'name', 'username', 'is_moderator']
         writer.writerow(headers)
         
         # Данные
