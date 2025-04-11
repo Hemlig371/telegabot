@@ -97,8 +97,8 @@ def init_db():
 
         # Индексы при инициализации БД
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(chat_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(creator_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_chat_id ON tasks(chat_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_creator_id ON tasks(creator_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_deadline ON tasks(deadline)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_log_id ON tasks_log(id)')
@@ -225,7 +225,7 @@ async def cmd_new_task(message: types.Message):
     await new_task_start(message)  # Тот же обработчик, что и для кнопки "➕ Новая задача"
 
 @dp.message_handler(commands=["quicktask"])
-async def cmd_new_task(message: types.Message):
+async def cmd_quick_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
@@ -294,7 +294,7 @@ async def cmd_export_tasks(message: types.Message):
     await export_tasks_to_csv2(message)  # Аналогично кнопке "📤 Экспорт (с исполненными)"
 
 @dp.message_handler(commands=["cancel"])
-async def cmd_new_task(message: types.Message):
+async def cmd_cancel(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
@@ -471,7 +471,7 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
         )
 
         response2 = (
-            f"🔔 Вам назначена новая задача от {creator[0]}:\n"
+            f"🔔 Вам назначена новая задача от {creator[0]}:\n\n"
             f"📌 <b>{task_text}</b>\n"
         )
         if deadline:
@@ -613,7 +613,7 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         )
 
         response2 = (
-            f"🔔 Вам назначена новая задача от {creator[0]}:\n"
+            f"🔔 Вам назначена новая задача от {creator[0]}:\n\n"
             f"📌 <b>{task_text}</b>\n"
             f"⏳ {deadline if deadline else 'не указан'}"
         )
