@@ -463,7 +463,7 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
-        if not username[0] is None
+        if not username[0] is None:
             await bot.send_message(
                 chat_id=username[0],
                 text=response2,
@@ -573,11 +573,31 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         )
         conn.commit()
 
+        cursor.execute("SELECT tg_user_id FROM users WHERE username=?",(executor,))
+        username = cursor.fetchone()
+
         response = (
             f"📌 <b>{task_text}</b>\n"
             f"👤 {executor if executor else 'не указан'} ⏳ {deadline if deadline else 'не указан'}"
         )
+
+        response2 = (
+            f"🔔 Вам назначена новая задача:\n"
+            f"📌 <b>{task_text}</b>\n"
+            f"👤 {executor} "
+        )
+        if deadline:
+            response += f"⏳ {deadline}"
+        else:
+            response += "⏳ Без срока"
+          
         await bot.send_message(chat_id=message.from_user.id, text=response)
+
+        if not username[0] is None:
+          await bot.send_message(
+              chat_id=username[0],
+              text=response2
+          )
 
     except ValueError as e:
         await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка: {str(e)}")
