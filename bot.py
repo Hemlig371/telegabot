@@ -324,7 +324,11 @@ async def cancel_handler(message: types.Message, state: FSMContext):
     current_state = await state.get_state()
     if current_state:
         await state.finish()
-    await message.reply("Действие отменено. Возвращаемся к стартовому меню.", reply_markup=menu_keyboard)
+    
+    if message.chat.type != "private":
+        await message.reply("Действие отменено. Возвращаемся к стартовому меню.", reply_markup=group_menu_keyboard)
+    else:
+        await message.reply("Действие отменено. Возвращаемся к стартовому меню.", reply_markup=menu_keyboard)
 
 # ======================
 # СОЗДАНИЕ ЗАДАЧ
@@ -334,7 +338,12 @@ async def cancel_handler(message: types.Message, state: FSMContext):
 async def new_task_start(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
-        return  
+        return
+
+    if message.chat.type != "private":
+      await bot.send_message(chat_id=message.from_user.id, text="⛔ Команда для ЛС!")
+      return
+
     """Начало создания задачи через кнопку меню"""
     await bot.send_message(chat_id=message.from_user.id, text="📌 Введите название задачи:")
     await TaskCreation.waiting_for_title.set()
@@ -642,7 +651,12 @@ class StatusUpdate(StatesGroup):
 async def status_select_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
-        return  
+        return 
+
+    if message.chat.type != "private":
+      await bot.send_message(chat_id=message.from_user.id, text="⛔ Команда для ЛС!")
+      return
+
     """Показ списка задач для изменения статуса"""
     
     # Сначала получаем список уникальных исполнителей
@@ -818,6 +832,10 @@ async def executor_select_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
+
+    if message.chat.type != "private":
+      await bot.send_message(chat_id=message.from_user.id, text="⛔ Команда для ЛС!")
+      return
     
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status NOT IN ('удалено', 'исполнено') LIMIT 20")
@@ -1073,6 +1091,10 @@ async def deadline_select_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
+
+    if message.chat.type != "private":
+      await bot.send_message(chat_id=message.from_user.id, text="⛔ Команда для ЛС!")
+      return
     
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status NOT IN ('удалено', 'исполнено') LIMIT 20")
@@ -1283,7 +1305,12 @@ current_filters = {}
 async def list_tasks(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
-        return  
+        return
+
+    if message.chat.type != "private":
+      await bot.send_message(chat_id=message.from_user.id, text="⛔ Команда для ЛС!")
+      return
+
     """Просмотр списка задач с выбором исполнителя и пагинацией"""
     try:
         cursor = conn.cursor()
@@ -1452,7 +1479,12 @@ current_filters_deadline = {}
 async def list_tasks_by_deadline(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
-        return  
+        return
+
+    if message.chat.type != "private":
+      await bot.send_message(chat_id=message.from_user.id, text="⛔ Команда для ЛС!")
+      return
+
     """Просмотр списка задач с выбором срока и пагинацией"""
     try:
         cursor = conn.cursor()
