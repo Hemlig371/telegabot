@@ -352,27 +352,19 @@ async def process_title(message: types.Message, state: FSMContext):
     """Обработка названия задачи"""
     await state.update_data(title=message.text)
     
-    # Получаем список последних исполнителей из БД
+    # Получаем список исполнителей из БД
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
-    executors = cursor.fetchall()
-    
-    # Создаем клавиатуру с вариантами
+    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status <> 'удалено' LIMIT 20")
+    # Используем list comprehension для получения списка непустых идентификаторов исполнителей
+    executors = [executor[0] for executor in cursor.fetchall() if executor[0]]
+
+    # Создаем клавиатуру с вариантами (ReplyKeyboardMarkup)
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    executor_buttons = []  # Временный список для кнопок
-    
-    for executor in executors:
-        if executor[0]:  # Пропускаем пустые значения
-            executor_buttons.append(types.KeyboardButton(executor[0]))
-            
-            # Добавляем по 2 кнопки в ряд
-            if len(executor_buttons) == 2:
-                keyboard.row(*executor_buttons)
-                executor_buttons = []
-    
-    # Добавляем оставшиеся кнопки, если их количество нечетное
-    if executor_buttons:
-        keyboard.row(*executor_buttons)
+
+    # Добавляем кнопки по 2 в ряд
+    for i in range(0, len(executors), 2):
+        row_buttons = [types.KeyboardButton(name) for name in executors[i:i+2]]
+        keyboard.row(*row_buttons)
     
     await bot.send_message(
         chat_id=message.chat.id,
