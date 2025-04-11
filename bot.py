@@ -463,7 +463,7 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
-        if username is not None and username[0] is not None and username[0] != chat_id2:
+        if username is not None and username[0] is not None and username[0] != chat_id:
             await bot.send_message(
                 chat_id=username[0],
                 text=response2,
@@ -576,7 +576,7 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         cursor.execute("SELECT tg_user_id FROM users WHERE username=?",(executor,))
         username = cursor.fetchone()
 
-        cursor.execute("SELECT name FROM users WHERE tg_user_id=?",(chat_id,))
+        cursor.execute("SELECT name FROM users WHERE tg_user_id=?",(message.from_user.id,))
         creator = cursor.fetchone()
 
         response = (
