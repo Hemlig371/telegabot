@@ -71,8 +71,7 @@ def init_db():
                         chat_id INTEGER,
                         task_text TEXT,
                         status TEXT DEFAULT 'новая',
-                        deadline TEXT,
-                        priority TEXT)
+                        deadline TEXT)
                         ''')
         conn.commit()
 
