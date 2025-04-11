@@ -454,7 +454,7 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
         cursor.execute("SELECT tg_user_id FROM users WHERE username=?",(executor,))
         username = cursor.fetchone()
 
-        cursor.execute("SELECT name FROM users WHERE tg_user_id=?",(chat_id,))
+        cursor.execute("SELECT username FROM users WHERE tg_user_id=?",(chat_id,))
         creator = cursor.fetchone()
 
         response = (
@@ -596,7 +596,7 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         cursor.execute("SELECT tg_user_id FROM users WHERE username=?",(executor,))
         username = cursor.fetchone()
 
-        cursor.execute("SELECT name FROM users WHERE tg_user_id=?",(message.from_user.id,))
+        cursor.execute("SELECT username FROM users WHERE tg_user_id=?",(message.from_user.id,))
         creator = cursor.fetchone()
 
         response = (
