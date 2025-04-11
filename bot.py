@@ -1458,7 +1458,6 @@ async def list_tasks_by_deadline(message: types.Message):
                     callback_data=f"listtasks_deadline|{btn_data}"
                 ))
             keyboard.add(*row_buttons)
-        keyboard.add(InlineKeyboardButton("✏️ Ввести дату вручную", callback_data="deadline_manual_id"))
         await message.reply("Выберите срок для фильтрации задач:", reply_markup=keyboard)
     except Exception as e:
         logger.error(f"Ошибка при получении списка сроков: {str(e)}")
@@ -1526,7 +1525,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
             task_id, task_user, task_text, status, deadline = task
             result.append(
                 f"🔹: {task_id} 📝: {task_text}\n\n"
-                f"🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
+                f"👤: {task_user} 🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
                 f"──────────"
             )
         keyboard = InlineKeyboardMarkup(row_width=3)
