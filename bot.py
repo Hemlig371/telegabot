@@ -349,29 +349,47 @@ async def new_task_start(message: types.Message):
 
 @dp.message_handler(state=TaskCreation.waiting_for_title)
 async def process_title(message: types.Message, state: FSMContext):
-    """Обработка названия задачи"""
-    await state.update_data(title=message.text)
-    
     # Получаем список исполнителей из БД
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status <> 'удалено' LIMIT 20")
-    # Используем list comprehension для получения списка непустых идентификаторов исполнителей
     executors = [executor[0] for executor in cursor.fetchall() if executor[0]]
 
-    # Создаем клавиатуру с вариантами (ReplyKeyboardMarkup)
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-
-    # Добавляем кнопки по 2 в ряд
+    # Создаём inline-клавиатуру (замена ReplyKeyboardMarkup)
+    keyboard = InlineKeyboardMarkup(row_width=2)
     for i in range(0, len(executors), 2):
-        row_buttons = [types.KeyboardButton(name) for name in executors[i:i+2]]
+        row_buttons = [InlineKeyboardButton(f"👤 {name}", callback_data=f"executor_select|{name}")
+                       for name in executors[i:i+2]]
         keyboard.row(*row_buttons)
-    
+    # Кнопка для ручного ввода
+    keyboard.add(InlineKeyboardButton("✏️ Ввести @username вручную", callback_data="executor_select|manual"))
+
     await bot.send_message(
         chat_id=message.chat.id,
         text="👤 Выберите исполнителя или введите @username вручную:",
         reply_markup=keyboard
     )
     await TaskCreation.waiting_for_executor.set()
+
+@dp.callback_query_handler(lambda c: c.data.startswith("executor_select|"), state=TaskCreation.waiting_for_executor)
+async def process_executor_callback(callback_query: types.CallbackQuery, state: FSMContext):
+    executor = callback_query.data.split("|", 1)[1]
+    if executor == "manual":
+        await bot.answer_callback_query(callback_query.id, text="✏️ Введите @username вручную")
+        # Дальше можно оставить ожидание текстового ввода (обработчик ниже уже существует)
+        return
+    # Сохраняем выбранного исполнителя в состоянии
+    await state.update_data(executor=executor)
+    # Убираем inline-клавиатуру, редактируя сообщение
+    await bot.edit_message_reply_markup(chat_id=callback_query.message.chat.id,
+                                        message_id=callback_query.message.message_id,
+                                        reply_markup=None)
+    # Переходим к следующему шагу: выбор срока
+    await bot.send_message(
+        chat_id=callback_query.from_user.id,
+        text="⏳ Выберите срок или введите свой:",
+        reply_markup=get_deadline_keyboard(with_none_option=True)
+    )
+    await TaskCreation.waiting_for_deadline.set()
 
 @dp.message_handler(state=TaskCreation.waiting_for_executor)
 async def process_executor(message: types.Message, state: FSMContext):
