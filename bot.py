@@ -30,8 +30,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Конфигурация
-API_TOKEN = os.getenv('apibotkey')
-DB_PATH = "/bd1/tasks.db"
+API_TOKEN = os.getenv('apibotkeytest')
+DB_PATH = "/bd1/test_tasks.db"
 
 # Список разрешенных пользователей
 ALLOWED_USERS: List[str] = []  
@@ -41,6 +41,15 @@ def update_allowed_users(conn):
     cursor = conn.cursor()
     cursor.execute('SELECT CAST(tg_user_id as INT) FROM users')
     ALLOWED_USERS = [row[0] for row in cursor.fetchall()]
+
+# Список модераторов
+MODERATOR_USERS: List[str] = []  
+
+def update_moderator_users(conn):
+    global MODERATOR_USERS
+    cursor = conn.cursor()
+    cursor.execute("""SELECT CAST(tg_user_id as INT) FROM users WHERE is_moderator = 'moderator' """)
+    MODERATOR_USERS = [row[0] for row in cursor.fetchall()]
 
 # ID администратора (может удалять задачи)
 ADMIN_ID = int(os.getenv('admin'))
@@ -57,6 +66,7 @@ def init_db():
         
         cursor.execute('''CREATE TABLE IF NOT EXISTS tasks (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        creator_id TEXT,
                         user_id TEXT,
                         chat_id INTEGER,
                         task_text TEXT,
@@ -66,19 +76,33 @@ def init_db():
         conn.commit()
 
         cursor.execute('''CREATE TABLE IF NOT EXISTS users (
-                        tg_user_id TEXT PRIMARY KEY)
+                        tg_user_id TEXT PRIMARY KEY,
+                        name TEXT,
+                        username TEXT,
+                        is_moderator TEXT)
                         ''')
         conn.commit()
 
         cursor.execute('''CREATE TABLE IF NOT EXISTS tasks_log (
                         id INTEGER,
+                        creator_id TEXT,
                         user_id TEXT,
                         chat_id INTEGER,
                         task_text TEXT,
                         status TEXT,
                         deadline TEXT,
+                        priority TEXT,
                         id_log INTEGER PRIMARY KEY AUTOINCREMENT)
                         ''')
+
+        # Индексы при инициализации БД
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_chat_id ON tasks(chat_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_creator_id ON tasks(creator_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_deadline ON tasks(deadline)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_log_id ON tasks_log(id)')
+        
         conn.commit()
       
         return conn
@@ -88,6 +112,7 @@ def init_db():
 
 conn = init_db()
 update_allowed_users(conn)
+update_moderator_users(conn)
 
 # ======================
 # КЛАВИАТУРЫ И ИНТЕРФЕЙС
@@ -98,20 +123,22 @@ menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 menu_keyboard.add(
     KeyboardButton("➕ Новая задача"),
     KeyboardButton("⚡ Быстрая задача"),
-    KeyboardButton("📋 Список задач"),
     KeyboardButton("🔄 Изменить статус"),
     KeyboardButton("👤 Изменить исполнителя"),
     KeyboardButton("⏳ Изменить срок"),
+    KeyboardButton("📋 Список задач"),
+    KeyboardButton("📋 Список (по сроку)"),
     KeyboardButton("📤 Экспорт задач"),
-    KeyboardButton("📤 Экспорт (с исполненными)")
+    KeyboardButton("📤 Экспорт (с исполненными)"),
+    KeyboardButton("⛔ Отмена")
 )
 
 # Клавиатура для групповых чатов
 group_menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 group_menu_keyboard.add(
     KeyboardButton("⚡ Быстрая задача"),
-    KeyboardButton("➕ Новая задача"),
-    KeyboardButton("📤 Экспорт задач")
+    KeyboardButton("📤 Экспорт задач"),
+    KeyboardButton("⛔ Отмена")
 )
 
 # Клавиатура выбора даты
@@ -158,13 +185,17 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="/setexecutor", description="Изменить исполнителя"),
         BotCommand(command="/setdeadline", description="Изменить срок"),
         BotCommand(command="/listtasks", description="Список задач"),
+        BotCommand(command="/listtasksdate", description="Список (по сроку)"),
         BotCommand(command="/export", description="Экспорт в CSV"),
-        BotCommand(command="/export2", description="Экспорт с исполненными"),
+        BotCommand(command="/export2", description="Экспорт (с исполненными)"),
         BotCommand(command="/start", description="Старт бота"),
+        BotCommand(command="/cancel", description="Отмена текущего действия"),
         BotCommand(command="/myid", description="Узнать свой ID"),
         BotCommand(command="/export3", description="Полный экспорт (админ)"),
         BotCommand(command="/deletetask", description="Удалить задачу (админ)"),
-        BotCommand(command="/adduser", description="Добавить пользователя (админ)")
+        BotCommand(command="/export4", description="Список пользователей (админ)"),
+        BotCommand(command="/adduser", description="Добавить пользователя (админ)"),
+        BotCommand(command="/removeuser", description="Удалить пользователя (админ)")
     ]
     await bot.set_my_commands(commands)
 
@@ -176,12 +207,12 @@ async def start_command(message: types.Message):
 
     if message.chat.type == "private":
         await bot.send_message(chat_id=message.chat.id, text=
-            "👋 Привет! Я бот для управления задачами. Выберите команду:",
+            "Выберите команду:",
             reply_markup=menu_keyboard
         )
     else:
         await bot.send_message(chat_id=message.chat.id, text=
-            "👋 Привет! Я бот для управления задачами. Выберите команду:",
+            "Выберите команду:",
             reply_markup=group_menu_keyboard
         )
 
@@ -194,7 +225,7 @@ async def cmd_new_task(message: types.Message):
     await new_task_start(message)  # Тот же обработчик, что и для кнопки "➕ Новая задача"
 
 @dp.message_handler(commands=["quicktask"])
-async def cmd_new_task(message: types.Message):
+async def cmd_quick_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
@@ -239,6 +270,15 @@ async def cmd_list_tasks(message: types.Message):
         return  
     await list_tasks(message)  # Аналогично кнопке "📋 Список задач"
 
+@dp.message_handler(commands=["listtasksdate"])
+async def cmd_list_tasks_date(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+    if message.chat.type != "private":
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Выводить список можно только в ЛС")
+        return  
+    await list_tasks_by_deadline(message)  # Аналогично кнопке "📋 Список (по сроку)"
+
 @dp.message_handler(commands=["export"])
 async def cmd_export_tasks(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
@@ -252,6 +292,13 @@ async def cmd_export_tasks(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     await export_tasks_to_csv2(message)  # Аналогично кнопке "📤 Экспорт (с исполненными)"
+
+@dp.message_handler(commands=["cancel"])
+async def cmd_cancel(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+        return  
+    await cancel_handler(message)  # Тот же обработчик, что и для кнопки "⛔ Отмена"
 
 # ======================
 # СОСТОЯНИЯ БОТА
@@ -267,6 +314,21 @@ class TaskDeletion(StatesGroup):
     waiting_for_confirmation = State()
     waiting_for_manual_id = State()
 
+@dp.message_handler(lambda message: message.text == "⛔ Отмена", state='*')
+async def cancel_handler(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+        return  
+      
+    current_state = await state.get_state()
+    if current_state:
+        await state.finish()
+    
+    if message.chat.type != "private":
+        await message.reply("Действие отменено. Возвращаемся к стартовому меню.", reply_markup=group_menu_keyboard)
+    else:
+        await message.reply("Действие отменено. Возвращаемся к стартовому меню.", reply_markup=menu_keyboard)
+
 # ======================
 # СОЗДАНИЕ ЗАДАЧ
 # ======================
@@ -275,7 +337,12 @@ class TaskDeletion(StatesGroup):
 async def new_task_start(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
-        return  
+        return
+
+    if message.chat.type != "private":
+      await bot.send_message(chat_id=message.from_user.id, text="⛔ Команда для ЛС!")
+      return
+
     """Начало создания задачи через кнопку меню"""
     await bot.send_message(chat_id=message.from_user.id, text="📌 Введите название задачи:")
     await TaskCreation.waiting_for_title.set()
@@ -285,27 +352,19 @@ async def process_title(message: types.Message, state: FSMContext):
     """Обработка названия задачи"""
     await state.update_data(title=message.text)
     
-    # Получаем список последних исполнителей из БД
+    # Получаем список исполнителей из БД
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
-    executors = cursor.fetchall()
-    
-    # Создаем клавиатуру с вариантами
+    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status <> 'удалено' LIMIT 20")
+    # Используем list comprehension для получения списка непустых идентификаторов исполнителей
+    executors = [executor[0] for executor in cursor.fetchall() if executor[0]]
+
+    # Создаем клавиатуру с вариантами (ReplyKeyboardMarkup)
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    executor_buttons = []  # Временный список для кнопок
-    
-    for executor in executors:
-        if executor[0]:  # Пропускаем пустые значения
-            executor_buttons.append(types.KeyboardButton(executor[0]))
-            
-            # Добавляем по 2 кнопки в ряд
-            if len(executor_buttons) == 2:
-                keyboard.row(*executor_buttons)
-                executor_buttons = []
-    
-    # Добавляем оставшиеся кнопки, если их количество нечетное
-    if executor_buttons:
-        keyboard.row(*executor_buttons)
+
+    # Добавляем кнопки по 2 в ряд
+    for i in range(0, len(executors), 2):
+        row_buttons = [types.KeyboardButton(name) for name in executors[i:i+2]]
+        keyboard.row(*row_buttons)
     
     await bot.send_message(
         chat_id=message.chat.id,
@@ -387,19 +446,32 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
 
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO tasks (user_id, chat_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-            (executor, chat_id, task_text, deadline)
+            "INSERT INTO tasks (user_id, chat_id, task_text, deadline, creator_id) VALUES (?, ?, ?, ?, ?)",
+            (executor, chat_id, task_text, deadline, chat_id)
         )
         conn.commit()
+
+        cursor.execute("SELECT tg_user_id FROM users WHERE username=?",(executor,))
+        username = cursor.fetchone()
+
+        cursor.execute("SELECT username FROM users WHERE tg_user_id=?",(chat_id,))
+        creator = cursor.fetchone()
 
         response = (
             f"📌 <b>{task_text}</b>\n"
             f"👤 {executor} "
         )
+
+        response2 = (
+            f"🔔 Вам назначена новая задача от {creator[0]}:\n\n"
+            f"📌 <b>{task_text}</b>\n"
+        )
         if deadline:
             response += f"⏳ {deadline}"
+            response2 += f"⏳ {deadline}"
         else:
             response += "⏳ Без срока"
+            response2 += "⏳ Без срока"
             
         # Определяем клавиатуру в зависимости от типа чата
         reply_markup = menu_keyboard if chat_type == "private" else group_menu_keyboard
@@ -411,6 +483,12 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
             parse_mode=ParseMode.HTML,
             reply_markup=reply_markup
         )
+        if username is not None and username[0] is not None and username[0] != str(chat_id):
+            await bot.send_message(
+                chat_id=username[0],
+                text=response2,
+                parse_mode=ParseMode.HTML
+            )
   
     except sqlite3.Error as e:
         logger.error(f"Ошибка БД при сохранении задачи: {e}")
@@ -473,7 +551,7 @@ async def quick_task_start(message: types.Message):
     """Начало быстрого создания задачи"""
     await bot.send_message(chat_id=message.from_user.id, text=
         "📝 Введите данные в формате:\n"
-        "текст задачи @исполнитель /срок"
+        "текст задачи @исполнитель //срок"
     )
     await QuickTaskCreation.waiting_for_full_data.set()
 
@@ -486,8 +564,8 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         
         # Парсим данные с помощью регулярных выражений
         task_match = re.search(r'^(.*?)(\s@|$)', text)
-        executor_match = re.search(r'(@[^/]+)', text)
-        deadline_match = re.search(r'/(\S+)', text)
+        executor_match = re.search(r'(@[^//]+)', text)
+        deadline_match = re.search(r'//(\S+)', text)
         deadline_raw = deadline_match.group(1) if deadline_match else None
 
         task_text = task_match.group(1).strip() if task_match else None
@@ -510,16 +588,35 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         # Сохранение в БД
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO tasks (user_id, chat_id, task_text, deadline) VALUES (?, ?, ?, ?)",
-            (executor, message.from_user.id, task_text, deadline)
+            "INSERT INTO tasks (user_id, chat_id, task_text, deadline, creator_id) VALUES (?, ?, ?, ?, ?)",
+            (executor, message.from_user.id, task_text, deadline, message.from_user.id)
         )
         conn.commit()
+
+        cursor.execute("SELECT tg_user_id FROM users WHERE username=?",(executor,))
+        username = cursor.fetchone()
+
+        cursor.execute("SELECT username FROM users WHERE tg_user_id=?",(message.from_user.id,))
+        creator = cursor.fetchone()
 
         response = (
             f"📌 <b>{task_text}</b>\n"
             f"👤 {executor if executor else 'не указан'} ⏳ {deadline if deadline else 'не указан'}"
         )
+
+        response2 = (
+            f"🔔 Вам назначена новая задача от {creator[0]}:\n\n"
+            f"📌 <b>{task_text}</b>\n"
+            f"⏳ {deadline if deadline else 'не указан'}"
+        )
+          
         await bot.send_message(chat_id=message.from_user.id, text=response)
+
+        if username is not None and username[0] is not None and username[0] != str(message.from_user.id):
+          await bot.send_message(
+              chat_id=username[0],
+              text=response2
+          )
 
     except ValueError as e:
         await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка: {str(e)}")
@@ -545,14 +642,19 @@ class StatusUpdate(StatesGroup):
 async def status_select_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
-        return  
+        return 
+
+    if message.chat.type != "private":
+      await bot.send_message(chat_id=message.from_user.id, text="⛔ Команда для ЛС!")
+      return
+
     """Показ списка задач для изменения статуса"""
     
     # Сначала получаем список уникальных исполнителей
     cursor = conn.cursor()
     cursor.execute("""
         SELECT DISTINCT user_id FROM tasks 
-        WHERE status<>'удалено'
+        WHERE status NOT IN ('удалено', 'исполнено')
         LIMIT 20
     """)
     
@@ -666,7 +768,15 @@ async def process_manual_task_id_status(message: types.Message, state: FSMContex
 async def show_status_options(message_obj, task_id):
     """Показать варианты статусов"""
     keyboard = InlineKeyboardMarkup(row_width=3)
-    statuses = ["новая", "в работе", "ожидает доклада", "исполнено", "удалено"]
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
+    task_creator = cursor.fetchone()
+    if int(task_creator[0]) == message_obj.chat.id or message_obj.chat.id in MODERATOR_USERS:
+        statuses = ["новая", "в работе", "ожидает доклада", "исполнено", "удалено"]
+    else:
+        statuses = ["новая", "в работе", "ожидает доклада", "исполнено"]
+    
     buttons = [InlineKeyboardButton(
         status, 
         callback_data=f"set_status_{task_id}_{status}"
@@ -683,8 +793,8 @@ async def process_status_update(callback_query: types.CallbackQuery, state: FSMC
         
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline)
-            SELECT id, user_id, chat_id, task_text, status, deadline 
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
+            SELECT id, user_id, chat_id, task_text, status, deadline, creator_id 
             FROM tasks 
             WHERE id=?
         """, (task_id,))
@@ -713,9 +823,13 @@ async def executor_select_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
+
+    if message.chat.type != "private":
+      await bot.send_message(chat_id=message.from_user.id, text="⛔ Команда для ЛС!")
+      return
     
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status NOT IN ('удалено', 'исполнено') LIMIT 20")
     executors = cursor.fetchall()
     
     if not executors:
@@ -750,23 +864,42 @@ async def show_executor_tasks(message_obj, executor):
     """Отображение задач выбранного исполнителя"""
     try:
         cursor = conn.cursor()
-        if executor.lower() == "none":
-            cursor.execute("""
-                SELECT id, task_text, status 
-                FROM tasks
-                WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено')
-                ORDER BY id DESC 
-                LIMIT 20
-            """)
+
+        if message_obj.chat.id in MODERATOR_USERS:
+            if executor.lower() == "none":
+                cursor.execute("""
+                    SELECT id, task_text, status 
+                    FROM tasks
+                    WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено')
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """)
+            else:
+                cursor.execute("""
+                    SELECT id, task_text, status 
+                    FROM tasks
+                    WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено')
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """, (executor,))
         else:
-            cursor.execute("""
-                SELECT id, task_text, status 
-                FROM tasks
-                WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено')
-                ORDER BY id DESC 
-                LIMIT 20
-            """, (executor,))
-        
+            if executor.lower() == "none":
+                cursor.execute("""
+                    SELECT id, task_text, status 
+                    FROM tasks
+                    WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено') AND creator_id=?
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """, (str(message_obj.chat.id),))
+            else:
+                cursor.execute("""
+                    SELECT id, task_text, status 
+                    FROM tasks
+                    WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено') AND creator_id=?
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """, (executor, str(message_obj.chat.id)))
+
         tasks = cursor.fetchall()
 
         keyboard = InlineKeyboardMarkup(row_width=1)
@@ -902,11 +1035,19 @@ async def process_and_save_executor(message_obj, new_executor: str, state: FSMCo
         user_data = await state.get_data()
         task_id = user_data['task_id']
         chat_type = message_obj.chat.type
-
+      
         cursor = conn.cursor()
+
+        cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
+        task_creator = cursor.fetchone()
+        if int(task_creator[0]) != message_obj.chat.id and message_obj.chat.id not in MODERATOR_USERS:
+            await bot.send_message(chat_id=message_obj.chat.id, text="⚠ Вы не можете изменить эту задачу!")
+            await state.finish()
+            return
+          
         cursor.execute("""
-            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline)
-            SELECT id, user_id, chat_id, task_text, status, deadline 
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
+            SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
             FROM tasks 
             WHERE id=?
         """, (task_id,))
@@ -941,9 +1082,13 @@ async def deadline_select_task(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return
+
+    if message.chat.type != "private":
+      await bot.send_message(chat_id=message.from_user.id, text="⛔ Команда для ЛС!")
+      return
     
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status<>'удалено' LIMIT 20")
+    cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status NOT IN ('удалено', 'исполнено') LIMIT 20")
     executors = cursor.fetchall()
     
     if not executors:
@@ -975,22 +1120,40 @@ async def process_deadline_filter(callback_query: types.CallbackQuery, state: FS
 async def show_deadline_tasks(message_obj, executor):
     try:
         cursor = conn.cursor()
-        if executor.lower() == "none":  # Проверяем, ищем ли задачи без исполнителя
-            cursor.execute("""
-                SELECT id, task_text, status 
-                FROM tasks
-                WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено')
-                ORDER BY id DESC 
-                LIMIT 20
-            """)
+        if message_obj.chat.id in MODERATOR_USERS:
+            if executor.lower() == "none":
+                cursor.execute("""
+                    SELECT id, task_text, deadline 
+                    FROM tasks
+                    WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено')
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """)
+            else:
+                cursor.execute("""
+                    SELECT id, task_text, deadline 
+                    FROM tasks
+                    WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено')
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """, (executor,))
         else:
-            cursor.execute("""
-                SELECT id, task_text, status 
-                FROM tasks
-                WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено')
-                ORDER BY id DESC 
-                LIMIT 20
-            """, (executor,))
+            if executor.lower() == "none":
+                cursor.execute("""
+                    SELECT id, task_text, deadline 
+                    FROM tasks
+                    WHERE user_id IS NULL AND status NOT IN ('удалено', 'исполнено') AND creator_id=?
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """, (str(message_obj.chat.id),))
+            else:
+                cursor.execute("""
+                    SELECT id, task_text, deadline 
+                    FROM tasks
+                    WHERE user_id = ? AND status NOT IN ('удалено', 'исполнено') AND creator_id=?
+                    ORDER BY id DESC 
+                    LIMIT 20
+                """, (executor, str(message_obj.chat.id)))
         
         tasks = cursor.fetchall()
 
@@ -1067,9 +1230,17 @@ async def process_deadline_choice(callback_query: types.CallbackQuery, state: FS
             response = f"✅ Новый срок: {new_deadline}"
         
         cursor = conn.cursor()
+
+        cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
+        task_creator = cursor.fetchone()
+        if int(task_creator[0]) != callback_query.from_user.id and callback_query.from_user.id not in MODERATOR_USERS:
+            await bot.send_message(chat_id=callback_query.from_user.id, text="⚠ Вы не можете изменить эту задачу!")
+            await state.finish()
+            return
+          
         cursor.execute("""
-            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline)
-            SELECT id, user_id, chat_id, task_text, status, deadline 
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
+            SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
             FROM tasks 
             WHERE id=?
         """, (task_id,))
@@ -1091,9 +1262,17 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
         task_id = user_data['task_id']
         
         cursor = conn.cursor()
+
+        cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
+        task_creator = cursor.fetchone()
+        if int(task_creator[0]) != message.from_user.id and message.from_user.id not in MODERATOR_USERS:
+            await bot.send_message(chat_id=message.from_user.id, text="⚠ Вы не можете изменить эту задачу!")
+            await state.finish()
+            return
+  
         cursor.execute("""
-            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline)
-            SELECT id, user_id, chat_id, task_text, status, deadline 
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
+            SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
             FROM tasks 
             WHERE id=?
         """, (task_id,))
@@ -1117,7 +1296,12 @@ current_filters = {}
 async def list_tasks(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
-        return  
+        return
+
+    if message.chat.type != "private":
+      await bot.send_message(chat_id=message.from_user.id, text="⛔ Команда для ЛС!")
+      return
+
     """Просмотр списка задач с выбором исполнителя и пагинацией"""
     try:
         cursor = conn.cursor()
@@ -1268,6 +1452,184 @@ async def process_tasks_pagination(callback_query: types.CallbackQuery):
         
         if sent_message:
             current_page[f"{user_id}_message_id"] = sent_message.message_id
+        
+        await bot.answer_callback_query(callback_query.id)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при переключении страниц: {str(e)}")
+        await bot.answer_callback_query(callback_query.id, "⚠ Ошибка при переключении страниц", show_alert=False)
+
+# ======================
+# СПИСОК ЗАДАЧ (по сроку)
+# ======================
+
+current_page_deadline = {}
+current_filters_deadline = {}
+
+@dp.message_handler(lambda message: message.text == "📋 Список (по сроку)")
+async def list_tasks_by_deadline(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+        return
+
+    if message.chat.type != "private":
+      await bot.send_message(chat_id=message.from_user.id, text="⛔ Команда для ЛС!")
+      return
+
+    """Просмотр списка задач с выбором срока и пагинацией"""
+    try:
+        cursor = conn.cursor()
+        # Получаем уникальные сроки. Если срок отсутствует (NULL), то можно отобразить вариант "Без срока"
+        cursor.execute("""
+            SELECT DISTINCT deadline FROM tasks 
+            WHERE status NOT IN ('удалено', 'исполнено')
+            ORDER BY deadline ASC
+            LIMIT 20
+        """)
+        deadlines = cursor.fetchall()
+        if not deadlines:
+            await message.reply("❌ Нет задач для отображения")
+            return
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        for i in range(0, len(deadlines), 2):
+            row = deadlines[i:i+2]
+            row_buttons = []
+            for d in row:
+                if d[0]:
+                    btn_text = d[0]
+                    btn_data = d[0]
+                else:
+                    btn_text = "Без срока"
+                    btn_data = "none"
+                row_buttons.append(InlineKeyboardButton(
+                    f"⏳ {btn_text}",
+                    callback_data=f"listtasks_deadline|{btn_data}"
+                ))
+            keyboard.add(*row_buttons)
+        await message.reply("Выберите срок для фильтрации задач:", reply_markup=keyboard)
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка сроков: {str(e)}")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при получении списка задач.")
+
+@dp.callback_query_handler(lambda c: c.data.startswith("listtasks_deadline|"))
+async def process_listtasks_deadline(callback_query: types.CallbackQuery):
+    deadline_filter = callback_query.data.split("|")[1]
+    user_id = callback_query.from_user.id
+    current_page_deadline[user_id] = 0
+    current_filters_deadline[user_id] = deadline_filter  # Сохраняем выбранный срок
+    sent_message = await show_tasks_page_by_deadline(callback_query.message, user_id, page=0, deadline_filter=deadline_filter)
+    current_page_deadline[f"{user_id}_message_id"] = sent_message.message_id
+    await bot.answer_callback_query(callback_query.id)
+
+async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page: int, deadline_filter: str = None):
+    try:
+        cursor = conn.cursor()
+        # Если выбран конкретный срок, считаем задачи с этим сроком.
+        # Если выбран вариант "Без срока" (deadline_filter == "none"), ищем записи с deadline IS NULL.
+        if deadline_filter and deadline_filter.lower() == "none":
+            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND deadline IS NULL")
+        elif deadline_filter:
+            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND deadline = ?", (deadline_filter,))
+        else:
+            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено')")
+        total_tasks = cursor.fetchone()[0]
+        
+        if total_tasks == 0:
+            return await bot.send_message(message.chat.id, "📭 Нет активных задач.")
+        
+        total_pages = (total_tasks - 1) // 10
+        page = max(0, min(page, total_pages))
+        
+        # Получаем задачи с применённой фильтрацией по сроку
+        if deadline_filter:
+            if deadline_filter.lower() == "none":
+                cursor.execute("""
+                    SELECT id, user_id, task_text, status, deadline 
+                    FROM tasks 
+                    WHERE status NOT IN ('удалено','исполнено') AND deadline IS NULL
+                    ORDER BY id DESC 
+                    LIMIT 10 OFFSET ?
+                """, (page * 10,))
+            else:
+                cursor.execute("""
+                    SELECT id, user_id, task_text, status, deadline 
+                    FROM tasks 
+                    WHERE status NOT IN ('удалено','исполнено') AND deadline = ?
+                    ORDER BY id DESC 
+                    LIMIT 10 OFFSET ?
+                """, (deadline_filter, page * 10))
+        else:
+            cursor.execute("""
+                SELECT id, user_id, task_text, status, deadline 
+                FROM tasks 
+                WHERE status NOT IN ('удалено','исполнено')
+                ORDER BY id DESC 
+                LIMIT 10 OFFSET ?
+            """, (page * 10,))
+        tasks = cursor.fetchall()
+
+        result = []
+        for task in tasks:
+            task_id, task_user, task_text, status, deadline = task
+            result.append(
+                f"🔹: {task_id} 📝: {task_text}\n\n"
+                f"👤: {task_user} 🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
+                f"──────────"
+            )
+        keyboard = InlineKeyboardMarkup(row_width=3)
+        buttons = []
+        if page > 0:
+            buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"tasks_prev_{page-1}"))
+        buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages+1}", callback_data="tasks_page"))
+        if page < total_pages:
+            buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=f"tasks_next_{page+1}"))
+        keyboard.row(*buttons)
+        
+        header = f"📋 Список задач (страница {page+1} из {total_pages+1})"
+        if deadline_filter:
+            deadline_display = 'Без срока' if deadline_filter.lower() == 'none' else deadline_filter
+            header = f"📋 Задачи со сроком: <b>{deadline_display}</b> (страница {page+1} из {total_pages+1})"
+        sent_message = await bot.send_message(
+            chat_id=message.chat.id,
+            text=header + ":\n\n" + "\n".join(result),
+            reply_markup=keyboard,
+            parse_mode=ParseMode.HTML
+        )
+        return sent_message
+        
+    except Exception as e:
+        logger.error(f"Ошибка при отображении страницы задач: {str(e)}")
+        await bot.send_message(message.from_user.id, "⚠ Ошибка при отображении задач.")
+        return None
+
+@dp.callback_query_handler(lambda c: c.data.startswith(("tasks_prev_", "tasks_next_")))
+async def process_tasks_pagination_deadline(callback_query: types.CallbackQuery):
+    """Обработка переключения страниц для фильтрации по сроку"""
+    try:
+        user_id = callback_query.from_user.id
+        action, page = callback_query.data.split("_")[1:3]
+        page = int(page)
+        
+        deadline_filter = current_filters_deadline.get(user_id)
+        current_page_deadline[user_id] = page
+        
+        class FakeMessage:
+            def __init__(self, chat_id):
+                self.chat = type('Chat', (), {'id': chat_id})()
+                self.from_user = type('User', (), {'id': user_id})()
+        
+        fake_message = FakeMessage(callback_query.message.chat.id)
+        sent_message = await show_tasks_page_by_deadline(fake_message, user_id, page, deadline_filter)
+        
+        try:
+            prev_message_id = current_page_deadline.get(f"{user_id}_message_id")
+            if prev_message_id:
+                await bot.delete_message(chat_id=callback_query.message.chat.id, message_id=prev_message_id)
+        except Exception as e:
+            logger.warning(f"Не удалось удалить сообщение: {e}")
+        
+        if sent_message:
+            current_page_deadline[f"{user_id}_message_id"] = sent_message.message_id
         
         await bot.answer_callback_query(callback_query.id)
         
@@ -1432,9 +1794,9 @@ async def export_tasks_to_csv3(message: types.Message):
     """Экспорт всех задач в CSV файл с кодировкой win1251"""
     try:
         cursor = conn.cursor()
-        cursor.execute("""SELECT id, user_id, chat_id, task_text, status, deadline, 999999 as "id_log" 
+        cursor.execute("""SELECT id, creator_id, user_id, chat_id, task_text, status, deadline, 999999 as "id_log" 
                           FROM tasks
-                          UNION ALL SELECT id, user_id, chat_id, task_text, status, deadline, id_log 
+                          UNION ALL SELECT id, creator_id, user_id, chat_id, task_text, status, deadline, id_log 
                           FROM tasks_log
                           ORDER BY id DESC, id_log DESC
                       """)
@@ -1462,7 +1824,7 @@ async def export_tasks_to_csv3(message: types.Message):
         )
         
         # Заголовки столбцов
-        headers = ['ID', 'Исполнитель', 'ID создателя', 'Задача', 'Статус', 'Срок', 'ID Log']
+        headers = ['ID', 'ID создателя', 'Исполнитель', 'ID редактора', 'Задача', 'Статус', 'Срок', 'ID Log']
         writer.writerow(headers)
         
         # Данные
@@ -1642,43 +2004,131 @@ async def add_user_command(message: types.Message):
     
     # Переводим в состояние ожидания ID пользователя
     await AddUserState.waiting_for_user_id.set()
-    await bot.send_message(chat_id=message.from_user.id, text="⏳ Введите ID пользователя для добавления в список разрешенных:")
+    await bot.send_message(chat_id=message.from_user.id, text="Введите ID пользователя для добавления в формате:\n'user_id|name|is_moderator|username'\n'moderator'/'username' могут быть пустыми")
 
 @dp.message_handler(state=AddUserState.waiting_for_user_id)
 async def process_user_id(message: types.Message, state: FSMContext):
-    user_id = message.text.strip()
+    match = re.match(r'^(\d+)\|([^|]+)(?:\|(moderator))?(?:\|(.+))?$', message.text.strip())
+    
+    if match:
+        user_id = match.group(1)
+        user_name = match.group(2)
+        is_moderator = match.group(3)
+        username = (match.group(4) or "").strip()
+    else:
+        await bot.send_message(chat_id=message.from_user.id, text="Строка не соответствует формату!")
+        await state.finish()
+        return
 
     if not user_id.isdigit():
-        await message.reply("❌ Введите корректный ID пользователя.")
+        await message.reply("ID пользователя должен быть числом!")
+        await state.finish()
         return
+
+    is_moderator = None if is_moderator == 'NULL' else is_moderator
 
     # Получаем подключение к базе данных из контекста
     cursor = conn.cursor()
     user_id = int(user_id)
 
+    # Проверяем, существует ли уже пользователь
+    cursor.execute("SELECT 1 FROM users WHERE tg_user_id = ?", (user_id,))
+    if cursor.fetchone():
+        await message.reply("⚠ Пользователь с таким ID уже существует!")
+        await state.finish()
+        return
+
     try:
         # Вставляем в базу данных
-        cursor.execute('INSERT INTO users (tg_user_id) VALUES (?)', (user_id,))
+        cursor.execute('INSERT INTO users (tg_user_id, name, is_moderator, username) VALUES (?, ?, ?, ?)', (user_id, user_name, is_moderator, username))
         conn.commit()
         
         # Обновляем список разрешенных пользователей
         update_allowed_users(conn)
+        update_moderator_users(conn)
         
         # Отправляем подтверждение
-        await message.reply("✅ Пользователь успешно добавлен в список разрешенных!")
+        await message.reply("✅ Пользователь успешно добавлен!")
         
     except sqlite3.Error as e:
         await message.reply("❌ Произошла ошибка при добавлении в базу данных")
+
+    # Завершаем состояние после выполнения всех действий
+    await state.finish()
+
+# ======================
+# Удаление Пользователя
+# ======================
+
+class RemoveUserState(StatesGroup):
+    waiting_for_user_id = State()  # Ожидаем ID пользователя
+
+@dp.message_handler(commands=["removeuser"])
+async def remove_user_command(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только администратор может удалять пользователей")
+        return
     
-    # Теперь экспортируем всех пользователей в CSV файл
+    # Переводим в состояние ожидания ID пользователя
+    await RemoveUserState.waiting_for_user_id.set()
+    await bot.send_message(chat_id=message.from_user.id, text="Введите ID пользователя для удаления:")
+
+@dp.message_handler(state=RemoveUserState.waiting_for_user_id)
+async def process_remove_user(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.reply("ID пользователя должен быть числом!")
+        await state.finish()
+        return
+
+    user_id = int(message.text)
+    cursor = conn.cursor()
+    
+    # Проверяем, существует ли пользователь
+    cursor.execute("SELECT 1 FROM users WHERE tg_user_id = ?", (user_id,))
+    if not cursor.fetchone():
+        await message.reply("⚠ Пользователь с таким ID не найден!")
+        await state.finish()
+        return
+    
+    try:
+        # Удаляем пользователя из базы
+        cursor.execute("DELETE FROM users WHERE tg_user_id = ?", (user_id,))
+        conn.commit()
+        
+        # Обновляем список разрешенных пользователей
+        update_allowed_users(conn)
+        update_moderator_users(conn)
+        
+        await message.reply("✅ Пользователь успешно удален!")
+        
+    except sqlite3.Error as e:
+        await message.reply("❌ Произошла ошибка при удалении из базы данных")
+    
+    await state.finish()
+
+# ======================
+# ЭКСПОРТ ПОЛЬЗОВАТЕЛЕЙ
+# ======================
+
+@dp.message_handler(commands=["export4"])
+async def export_users_to_csv3(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Только администратор может делать экспорт списка пользователей")
+        return
+      
+    """Экспорт всех задач в CSV файл с кодировкой win1251"""
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT tg_user_id FROM users")
+        cursor.execute("SELECT tg_user_id, name, username, is_moderator FROM users")
         users = cursor.fetchall()
+        
+        if not users:
+            await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет пользователей.")
+            return
 
         # Создаем CSV в памяти
         output = io.BytesIO()
-
+        
         # Используем TextIOWrapper с нужной кодировкой
         text_buffer = io.TextIOWrapper(
             output,
@@ -1686,40 +2136,41 @@ async def process_user_id(message: types.Message, state: FSMContext):
             errors='replace',  # заменяем некодируемые символы
             newline=''
         )
-
+        
         writer = csv.writer(
             text_buffer,
             delimiter=';',  # Указываем нужный разделитель
             quoting=csv.QUOTE_MINIMAL
         )
-
+        
         # Заголовки столбцов
-        headers = ['tg_user ID']
+        headers = ['tg_user_id', 'name', 'username', 'is_moderator']
         writer.writerow(headers)
-
+        
         # Данные
         for user in users:
-            row = [str(user[0]) if user[0] is not None else '']
+            # Преобразуем все значения в строки
+            row = [
+                str(item) if item is not None else ''
+                for item in user
+            ]
             writer.writerow(row)
-
+        
         # Важно: закрыть TextIOWrapper перед использованием буфера
         text_buffer.flush()
-        text_buffer.detach()
+        text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
         output.seek(0)
-
+        
         # Создаем временный файл
         csv_file = InputFile(output, filename="users_export.csv")
-
+        
         await message.reply_document(
             document=csv_file
         )
-
+        
     except Exception as e:
-        logger.error(f"Ошибка при экспорте пользователей: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
-
-    # Завершаем состояние после выполнения всех действий
-    await state.finish()
+        logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
+        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
 # ID Пользователя
