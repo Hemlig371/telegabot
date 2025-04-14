@@ -836,6 +836,10 @@ async def process_status_update(callback_query: types.CallbackQuery, state: FSMC
         _, _, task_id, new_status = callback_query.data.split("_")
         
         cursor = conn.cursor()
+      
+        cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
+        creator = cursor.fetchone()
+      
         cursor.execute("""
             INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
             SELECT id, user_id, chat_id, task_text, status, deadline, creator_id 
@@ -846,6 +850,13 @@ async def process_status_update(callback_query: types.CallbackQuery, state: FSMC
         conn.commit()
         
         await bot.send_message(chat_id=callback_query.from_user.id, text=f"✅ Статус задачи {task_id} изменен на '{new_status}'")
+        
+        if creator is not None and creator[0] is not None and creator[0] != str(callback_query.from_user.id) and new_status in ('исполнено', 'удалено'):
+          await bot.send_message(
+              chat_id=creator[0],
+              text=f"✅ Статус задачи {task_id} изменен на '{new_status}'"
+          )
+
         await state.finish()
     except Exception as e:
         logger.error(f"Ошибка при изменении статуса: {e}")
