@@ -1071,7 +1071,7 @@ async def process_text_replacement(message: types.Message, state: FSMContext):
             SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
             FROM tasks WHERE id=?
         """, (task_id,))
-        cursor.execute("UPDATE tasks SET task_text=? WHERE id=?", (new_text, task_id))
+        cursor.execute("UPDATE tasks SET task_text=?, chat_id=? WHERE id=?", (new_text, message.from_user.id, task_id))
         conn.commit()
         await bot.send_message(message.chat.id, text=f"✅ Текст задачи {task_id} успешно обновлен.")
     except Exception as e:
@@ -1107,7 +1107,7 @@ async def process_text_append(message: types.Message, state: FSMContext):
             SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
             FROM tasks WHERE id=?
         """, (task_id,))
-        cursor.execute("UPDATE tasks SET task_text=? WHERE id=?", (new_text, task_id))
+        cursor.execute("UPDATE tasks SET task_text=?, chat_id=? WHERE id=?", (new_text, message.from_user.id, task_id))
         conn.commit()
         await bot.send_message(chat_id=message.from_user.id, text=f"✅ Текст задачи {task_id} успешно дополнен.")
     except Exception as e:
