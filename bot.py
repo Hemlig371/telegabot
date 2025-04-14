@@ -1749,7 +1749,7 @@ async def export_tasks_to_csv2(message: types.Message):
                               deadline as "Срок"
                         FROM tasks
                         WHERE status NOT IN ('удалено')
-                        ORDER BY id DESC""")
+                        ORDER BY user_id ASC, deadline ASC""")
         tasks = cursor.fetchall()
         
         if not tasks:
@@ -1759,14 +1759,14 @@ async def export_tasks_to_csv2(message: types.Message):
         # Создаем книгу Excel
         wb = Workbook()
         ws = wb.active
-        ws.title = "Экспорт задач"
+        ws.title = "tasks_export"
         
         # Задаем заголовки
         headers = ['ID', 'Исполнитель', 'Задача', 'Статус', 'Срок']
         ws.append(headers)
         
         # Определяем стили
-        header_fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+        header_fill = PatternFill(start_color="B7DEE8", end_color="B7DEE8", fill_type="solid")
         thin_border = Border(
             left=Side(style="thin", color="000000"),
             right=Side(style="thin", color="000000"),
@@ -1792,7 +1792,7 @@ async def export_tasks_to_csv2(message: types.Message):
         # Настройка ширины столбцов
         # Предположим: столбец A – ID, B – Исполнитель (шире), C – Задача, D – Статус, E – Срок
         ws.column_dimensions['A'].width = 10
-        ws.column_dimensions['B'].width = 30  # второй столбец шире
+        ws.column_dimensions['B'].width = 20
         ws.column_dimensions['C'].width = 50
         ws.column_dimensions['D'].width = 20
         ws.column_dimensions['E'].width = 15
