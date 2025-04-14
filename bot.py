@@ -1793,7 +1793,7 @@ async def export_tasks_to_csv2(message: types.Message):
         # Предположим: столбец A – ID, B – Исполнитель (шире), C – Задача, D – Статус, E – Срок
         ws.column_dimensions['A'].width = 7
         ws.column_dimensions['B'].width = 18
-        ws.column_dimensions['C'].width = 50
+        ws.column_dimensions['C'].width = 40
         ws.column_dimensions['D'].width = 10
         ws.column_dimensions['E'].width = 12
                 
@@ -1811,7 +1811,7 @@ async def export_tasks_to_csv2(message: types.Message):
         for row in ws.iter_rows(min_row=2, min_col=5, max_col=5):
             for cell in row:
                 # Если значение может быть датой, задаем формат
-                cell.number_format = 'DD.MM.YYYY'
+                cell.number_format = 'YYYY-MM-DD'
 
         # Сохраняем Excel в память
         output = io.BytesIO()
