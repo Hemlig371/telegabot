@@ -334,7 +334,7 @@ async def cancel_handler(message: types.Message, state: FSMContext):
 def format_date(date_str):
     try:
         dt = datetime.strptime(date_str, "%Y-%m-%d")
-        return dt.strftime("%d.%m.%y")
+        return dt.strftime("%d.%m.%Y")
     except Exception:
         return date_str
 
@@ -422,7 +422,7 @@ async def process_deadline(callback_query: types.CallbackQuery, state: FSMContex
     if callback_query.data == "set_deadline_custom":
         # Сохраняем callback_query в состоянии
         await state.update_data(callback_query=callback_query)
-        await bot.send_message(chat_id=callback_query.from_user.id, text="⏳ Введите срок в формате YYYY-MM-DD:")
+        await bot.send_message(chat_id=callback_query.from_user.id, text="⏳ Введите срок в формате YYYY-MM-DD или DD.MM.YYYY:")
         return
     elif callback_query.data == "set_deadline_none":
         await save_task(callback_query, state, deadline=None)
@@ -439,7 +439,10 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
             dt = datetime.strptime(message.text.strip(), "%Y-%m-%d")
         except ValueError:
             # Если не получилось, пробуем другой формат
-            dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
+            try:
+                dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
+            except ValueError:
+                dt = datetime.strptime(message.text.strip(), "%d.%m.%y")
         new_deadline = dt.strftime("%Y-%m-%d")
         
         # Получаем сохраненный callback_query из состояния (если он есть)
@@ -454,7 +457,7 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
     except ValueError:
         # Определяем клавиатуру в зависимости от типа чата
         reply_markup = menu_keyboard if message.chat.type == "private" else group_menu_keyboard
-        await bot.send_message(chat_id=message.chat.id, text="⚠ Ошибка! Введите дату в формате YYYY-MM-DD.", reply_markup=reply_markup)
+        await bot.send_message(chat_id=message.chat.id, text="⚠ Ошибка! Введите дату в формате  или DD.MM.YYYY", reply_markup=reply_markup)
         await state.finish()
 
 async def save_task(message_obj, state: FSMContext, deadline: str):
@@ -574,7 +577,11 @@ def parse_deadline(deadline_str: str) -> str:
             dt = datetime.strptime(deadline_str, "%d.%m.%Y")
             return dt.strftime("%Y-%m-%d")
         except ValueError:
-            raise ValueError("Неверный формат даты. Используйте DD.MM.YYYY или YYYY-MM-DD")
+            try:
+                dt = datetime.strptime(deadline_str, "%d.%m.%y")
+                return dt.strftime("%Y-%m-%d")
+            except ValueError:
+                raise ValueError("Неверный формат даты. Используйте DD.MM.YYYY или YYYY-MM-DD")
 
 
 class QuickTaskCreation(StatesGroup):
@@ -1253,7 +1260,7 @@ async def show_deadline_options(message_obj):
 async def process_deadline_choice(callback_query: types.CallbackQuery, state: FSMContext):
     """Обработка выбора типа срока"""
     if callback_query.data == "set_deadline_custom":
-        await bot.send_message(chat_id=callback_query.from_user.id, text="📅 Введите дату в формате YYYY-MM-DD:")
+        await bot.send_message(chat_id=callback_query.from_user.id, text="📅 Введите дату в формате YYYY-MM-DD или DD.MM.YYYY:")
         await TaskUpdate.waiting_for_custom_deadline.set()
     else:
         user_data = await state.get_data()
@@ -1291,9 +1298,15 @@ async def process_deadline_choice(callback_query: types.CallbackQuery, state: FS
 async def process_custom_deadline(message: types.Message, state: FSMContext):
     """Обработка ввода даты вручную"""
     try:
-        # Проверка формата даты
-        datetime.strptime(message.text, "%Y-%m-%d")
-        new_deadline = message.text
+        # Пытаемся распарсить дату в одном из поддерживаемых форматов
+        try:
+            dt = datetime.strptime(message.text.strip(), "%Y-%m-%d")
+        except ValueError:
+            try:
+                dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
+            except ValueError:
+                dt = datetime.strptime(message.text.strip(), "%d.%m.%y")
+        new_deadline = dt.strftime("%Y-%m-%d")
         
         user_data = await state.get_data()
         task_id = user_data['task_id']
@@ -1319,7 +1332,7 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
         await bot.send_message(chat_id=message.from_user.id,text=f"✅ Новый срок установлен: {new_deadline}")
         await state.finish()
     except ValueError:
-        await bot.send_message(chat_id=message.from_user.id, text="⚠ Неверный формат даты! Используйте YYYY-MM-DD")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Неверный формат даты! Используйте YYYY-MM-DD или DD.MM.YYYY")
         await state.finish()
 
 # ======================
