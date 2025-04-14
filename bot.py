@@ -882,15 +882,14 @@ async def process_status_update(callback_query: types.CallbackQuery, state: FSMC
 # ИЗМЕНИТЬ ТЕКСТ ЗАДАЧИ
 # ======================
 
-# Определяем состояния для редактирования текста задачи
 class TaskTextEditing(StatesGroup):
-    waiting_for_task_id = State()         # Ожидание ввода ID задачи вручную
-    waiting_for_task_selection = State()    # Ожидание выбора задачи из списка
-    waiting_for_choice = State()            # Ожидание выбора: полная замена или дополнение
-    waiting_for_replacement = State()       # Ожидание нового текста для полной замены
-    waiting_for_append = State()            # Ожидание текста для дополнения
+    waiting_for_executor_filter = State()     # Выбор исполнителя для фильтрации задач
+    waiting_for_task_selection = State()      # Ожидание выбора задачи из списка (отфильтрованных по исполнителю)
+    waiting_for_task_id = State()             # Ожидание ввода ID задачи вручную
+    waiting_for_choice = State()              # Выбор между полной заменой и дополнением
+    waiting_for_replacement = State()         # Ввод нового текста (полная замена)
+    waiting_for_append = State()              # Ввод текста для дополнения
 
-# Хэндлер на команду (или кнопку) "✏️ Изменить задачу"
 @dp.message_handler(lambda message: message.text == "✏️ Изменить задачу")
 async def text_edit_start(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
@@ -901,33 +900,107 @@ async def text_edit_start(message: types.Message):
         return
 
     cursor = conn.cursor()
-    # Если пользователь – модератор, показываем все задачи, иначе показываем только задачи, созданные этим пользователем
+    # Если пользователь – модератор, показываем всех исполнителей, иначе – только исполнителей задач, созданных им
     if message.from_user.id in MODERATOR_USERS:
-        cursor.execute("SELECT id, task_text FROM tasks WHERE status NOT IN ('удалено','исполнено') LIMIT 20")
+        cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status NOT IN ('удалено','исполнено') LIMIT 20")
     else:
-        cursor.execute("SELECT id, task_text FROM tasks WHERE creator_id=? AND status NOT IN ('удалено','исполнено') LIMIT 20", (message.from_user.id,))
-    tasks = cursor.fetchall()
+        cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE creator_id=? AND status NOT IN ('удалено','исполнено') LIMIT 20", (message.from_user.id,))
+    executors = cursor.fetchall()
 
-    if not tasks:
+    if not executors:
         await bot.send_message(chat_id=message.from_user.id, text="❌ Нет задач для изменения")
+        return
+
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    for (executor,) in executors:
+        if executor:
+            label = f"👤 {executor}"
+            data = executor
+        else:
+            label = "👤 Без исполнителя"
+            data = "none"
+        keyboard.add(InlineKeyboardButton(label, callback_data=f"text_edit_executor|{data}"))
+    # Кнопка для ручного ввода исполнителя
+    keyboard.add(InlineKeyboardButton("✏️ Ввести ID задачи вручную", callback_data="text_edit_manual_id"))
+    
+    await bot.send_message(
+        chat_id=message.from_user.id,
+        text="Выберите исполнителя для фильтрации задач:",
+        reply_markup=keyboard
+    )
+    await TaskTextEditing.waiting_for_executor_filter.set()
+
+# Обработка выбора исполнителя из списка
+@dp.callback_query_handler(lambda c: c.data.startswith("text_edit_executor|"), state=TaskTextEditing.waiting_for_executor_filter)
+async def process_text_edit_executor(callback_query: types.CallbackQuery, state: FSMContext):
+    executor = callback_query.data.split("|")[1]
+    await state.update_data(executor=executor)
+    
+    # После выбора исполнителя выводим список задач, отфильтрованных по выбранному исполнителю
+    cursor = conn.cursor()
+    if executor.lower() == "none":
+        if callback_query.from_user.id in MODERATOR_USERS:
+            cursor.execute("SELECT id, task_text FROM tasks WHERE user_id IS NULL AND status NOT IN ('удалено','исполнено') LIMIT 20")
+        else:
+            cursor.execute("SELECT id, task_text FROM tasks WHERE user_id IS NULL AND creator_id=? AND status NOT IN ('удалено','исполнено') LIMIT 20", (callback_query.from_user.id,))
+    else:
+        if callback_query.from_user.id in MODERATOR_USERS:
+            cursor.execute("SELECT id, task_text FROM tasks WHERE user_id=? AND status NOT IN ('удалено','исполнено') LIMIT 20", (executor,))
+        else:
+            cursor.execute("SELECT id, task_text FROM tasks WHERE user_id=? AND creator_id=? AND status NOT IN ('удалено','исполнено') LIMIT 20", (executor, callback_query.from_user.id))
+    tasks = cursor.fetchall()
+    
+    if not tasks:
+        await bot.send_message(chat_id=callback_query.from_user.id, text="❌ Нет задач для выбранного исполнителя.")
+        await state.finish()
         return
 
     keyboard = InlineKeyboardMarkup(row_width=1)
     for task_id, task_text in tasks:
         preview = (task_text[:30] + "...") if len(task_text) > 30 else task_text
         keyboard.add(InlineKeyboardButton(f"🔹 {preview} (ID: {task_id})", callback_data=f"text_edit_task_{task_id}"))
-    # Кнопка для ручного ввода ID
+    # Возможность ввода ID задачи вручную
     keyboard.add(InlineKeyboardButton("✏️ Ввести ID задачи вручную", callback_data="text_edit_manual_id"))
     
-    await bot.send_message(chat_id=message.chat.id,
-                           text="Выберите задачу для изменения текста:",
-                           reply_markup=keyboard)
+    await bot.edit_message_text(
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        text="Выберите задачу для изменения текста:",
+        reply_markup=keyboard
+    )
+    await TaskTextEditing.waiting_for_task_selection.set()
+    await bot.answer_callback_query(callback_query.id)
+
+@dp.message_handler(state=TaskTextEditing.waiting_for_executor_filter)
+async def process_manual_executor_input_text_edit(message: types.Message, state: FSMContext):
+    executor = message.text.strip()
+    await state.update_data(executor=executor)
+    cursor = conn.cursor()
+    if message.from_user.id in MODERATOR_USERS:
+        cursor.execute("SELECT id, task_text FROM tasks WHERE user_id=? AND status NOT IN ('удалено','исполнено') LIMIT 20", (executor,))
+    else:
+        cursor.execute("SELECT id, task_text FROM tasks WHERE user_id=? AND creator_id=? AND status NOT IN ('удалено','исполнено') LIMIT 20", (executor, message.from_user.id))
+    tasks = cursor.fetchall()
+    
+    if not tasks:
+        await bot.send_message(chat_id=message.from_user.id, text="❌ Нет задач для данного исполнителя.")
+        await state.finish()
+        return
+
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    for task_id, task_text in tasks:
+        preview = (task_text[:30] + "...") if len(task_text) > 30 else task_text
+        keyboard.add(InlineKeyboardButton(f"🔹 {preview} (ID: {task_id})", callback_data=f"text_edit_task_{task_id}"))
+    keyboard.add(InlineKeyboardButton("✏️ Ввести ID задачи вручную", callback_data="text_edit_manual_id"))
+    await bot.send_message(
+        chat_id=message.from_user.id,
+        text="Выберите задачу для изменения текста:",
+        reply_markup=keyboard
+    )
     await TaskTextEditing.waiting_for_task_selection.set()
 
-# Обработка выбора задачи из списка (через inline-кнопку)
 @dp.callback_query_handler(lambda c: c.data.startswith("text_edit_task_"), state=TaskTextEditing.waiting_for_task_selection)
 async def process_text_edit_task(callback_query: types.CallbackQuery, state: FSMContext):
-    # Извлекаем ID задачи из callback_data (формат: "text_edit_task_{ID}")
     try:
         task_id = int(callback_query.data.split("_")[-1])
     except (ValueError, IndexError):
@@ -945,7 +1018,6 @@ async def process_text_edit_task(callback_query: types.CallbackQuery, state: FSM
     current_text, creator_id = result
     await state.update_data(task_id=task_id, old_text=current_text, creator_id=creator_id)
     
-    # Формируем меню с выбором действия: полная замена или дополнение
     keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(
         InlineKeyboardButton("Полностью заменить", callback_data="text_edit_full"),
@@ -960,15 +1032,13 @@ async def process_text_edit_task(callback_query: types.CallbackQuery, state: FSM
     await TaskTextEditing.waiting_for_choice.set()
     await bot.answer_callback_query(callback_query.id)
 
-# Обработка кнопки ручного ввода ID
+# Обработка ввода ID задачи вручную (если выбран соответствующий вариант)
 @dp.callback_query_handler(lambda c: c.data == "text_edit_manual_id", state=TaskTextEditing.waiting_for_task_selection)
 async def ask_manual_text_id(callback_query: types.CallbackQuery, state: FSMContext):
     await bot.send_message(chat_id=callback_query.from_user.id, text="✏️ Введите ID задачи:")
-    # Переключаем в состояние, где ожидается ввод ID текстом
     await TaskTextEditing.waiting_for_task_id.set()
     await bot.answer_callback_query(callback_query.id)
 
-# Обработка ввода ID задачи вручную (если пользователь не выбрал из списка)
 @dp.message_handler(state=TaskTextEditing.waiting_for_task_id)
 async def process_task_id_text_edit(message: types.Message, state: FSMContext):
     try:
@@ -998,13 +1068,11 @@ async def process_task_id_text_edit(message: types.Message, state: FSMContext):
                            reply_markup=keyboard)
     await TaskTextEditing.waiting_for_choice.set()
 
-# Далее обработчики для изменения текста (как уже реализованы):
-# Полная замена текста задачи
 @dp.callback_query_handler(lambda c: c.data == "text_edit_full", state=TaskTextEditing.waiting_for_choice)
 async def process_text_edit_choice_full(callback_query: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     creator_id = data.get("creator_id")
-    # Полная замена доступна только для создателя или модераторов
+    # Полная замена разрешена только если пользователь является создателем или модератором
     if int(creator_id) != callback_query.from_user.id and callback_query.from_user.id not in MODERATOR_USERS:
         await bot.send_message(callback_query.from_user.id,
                                text="⚠ Полная замена текста доступна только создателю задачи или модераторам!")
@@ -1015,7 +1083,6 @@ async def process_text_edit_choice_full(callback_query: types.CallbackQuery, sta
     await TaskTextEditing.waiting_for_replacement.set()
     await bot.answer_callback_query(callback_query.id)
 
-# Обработка полного ввода нового текста
 @dp.message_handler(state=TaskTextEditing.waiting_for_replacement)
 async def process_text_replacement(message: types.Message, state: FSMContext):
     new_text = message.text.strip()
@@ -1023,13 +1090,11 @@ async def process_text_replacement(message: types.Message, state: FSMContext):
     task_id = data.get("task_id")
     try:
         cursor = conn.cursor()
-        # Записываем текущее состояние задачи в лог для истории изменений
         cursor.execute("""
             INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
             SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
             FROM tasks WHERE id=?
         """, (task_id,))
-        # Полная замена: новый текст полностью заменяет старый
         cursor.execute("UPDATE tasks SET task_text=? WHERE id=?", (new_text, task_id))
         conn.commit()
         await bot.send_message(message.chat.id, text=f"✅ Текст задачи {task_id} успешно обновлен.")
@@ -1039,7 +1104,6 @@ async def process_text_replacement(message: types.Message, state: FSMContext):
     finally:
         await state.finish()
 
-# Дополнение текста задачи
 @dp.callback_query_handler(lambda c: c.data == "text_edit_append", state=TaskTextEditing.waiting_for_choice)
 async def process_text_edit_choice_append(callback_query: types.CallbackQuery, state: FSMContext):
     await bot.send_message(callback_query.from_user.id,
@@ -1047,7 +1111,6 @@ async def process_text_edit_choice_append(callback_query: types.CallbackQuery, s
     await TaskTextEditing.waiting_for_append.set()
     await bot.answer_callback_query(callback_query.id)
 
-# Обработка дополнения текста
 @dp.message_handler(state=TaskTextEditing.waiting_for_append)
 async def process_text_append(message: types.Message, state: FSMContext):
     append_text = message.text.strip()
@@ -1848,7 +1911,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
             task_id, task_user, task_text, status, deadline = task
             result.append(
                 f"🔹: {task_id} 📝: {task_text}\n\n"
-                f"👤: {task_user} 🔄: {status} ⏳: {format_date(deadline) if deadline else 'нет срока'}\n"
+                f"👤: {task_user} 🔄: {status}\n"
                 f"──────────"
             )
         keyboard = InlineKeyboardMarkup(row_width=3)
@@ -1863,7 +1926,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
         header = f"📋 Список задач (страница {page+1} из {total_pages+1})"
         if deadline_filter:
             deadline_display = 'Без срока' if deadline_filter.lower() == 'none' else deadline_filter
-            header = f"📋 Задачи со сроком: <b>{format_date(deadline_display)}</b> (страница {page+1} из {total_pages+1})"
+            header = f"📋 Задачи со сроком: <b>⏳: {format_date(deadline_display)}</b> (страница {page+1} из {total_pages+1})"
         sent_message = await bot.send_message(
             chat_id=message.chat.id,
             text=header + ":\n\n" + "\n".join(result),
