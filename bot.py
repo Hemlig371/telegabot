@@ -18,6 +18,8 @@ from aiohttp import web
 import csv
 import io
 from aiogram.types import InputFile
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 from aiogram.utils import exceptions
 from aiogram.types import ChatMemberUpdated, ChatType
@@ -30,8 +32,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Конфигурация
-API_TOKEN = os.getenv('apibotkey')
-DB_PATH = "/bd1/tasks.db"
+API_TOKEN = os.getenv('apibotkeytest')
+DB_PATH = "/bd1/test_tasks.db"
 
 # Список разрешенных пользователей
 ALLOWED_USERS: List[str] = []  
@@ -124,6 +126,7 @@ menu_keyboard.add(
     KeyboardButton("➕ Новая задача"),
     KeyboardButton("⚡ Быстрая задача"),
     KeyboardButton("🔄 Изменить статус"),
+    KeyboardButton("✏️ Изменить задачу"),
     KeyboardButton("👤 Изменить исполнителя"),
     KeyboardButton("⏳ Изменить срок"),
     KeyboardButton("📋 Список задач"),
@@ -182,6 +185,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="/newtask", description="Создать задачу"),
         BotCommand(command="/quicktask", description="Быстрая задача"),
         BotCommand(command="/setstatus", description="Изменить статус"),
+        BotCommand(command="/settext", description="Изменить задачу"),
         BotCommand(command="/setexecutor", description="Изменить исполнителя"),
         BotCommand(command="/setdeadline", description="Изменить срок"),
         BotCommand(command="/listtasks", description="Список задач"),
@@ -240,6 +244,16 @@ async def cmd_set_status(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Менять статус можно только в ЛС")
         return
     await status_select_task(message)  # Аналогично кнопке "🔄 Изменить статус"
+
+@dp.message_handler(commands=["settext"])
+async def cmd_set_status(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+        return  
+    if message.chat.type != "private":
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Менять задачу можно только в ЛС")
+        return
+    await text_edit_start(message)  # Аналогично кнопке "✏️ Изменить задачу"
 
 @dp.message_handler(commands=["setexecutor"])
 async def cmd_set_executor(message: types.Message):
@@ -329,6 +343,13 @@ async def cancel_handler(message: types.Message, state: FSMContext):
     else:
         await message.reply("Действие отменено. Возвращаемся к стартовому меню.", reply_markup=menu_keyboard)
 
+def format_date(date_str):
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return dt.strftime("%d.%m.%Y")
+    except Exception:
+        return date_str
+
 # ======================
 # СОЗДАНИЕ ЗАДАЧ
 # ======================
@@ -413,7 +434,7 @@ async def process_deadline(callback_query: types.CallbackQuery, state: FSMContex
     if callback_query.data == "set_deadline_custom":
         # Сохраняем callback_query в состоянии
         await state.update_data(callback_query=callback_query)
-        await bot.send_message(chat_id=callback_query.from_user.id, text="⏳ Введите срок в формате YYYY-MM-DD:")
+        await bot.send_message(chat_id=callback_query.from_user.id, text="⏳ Введите срок в формате YYYY-MM-DD или DD.MM.YYYY:")
         return
     elif callback_query.data == "set_deadline_none":
         await save_task(callback_query, state, deadline=None)
@@ -425,23 +446,30 @@ async def process_deadline(callback_query: types.CallbackQuery, state: FSMContex
 async def process_custom_deadline(message: types.Message, state: FSMContext):
     """Обработка ввода собственного срока"""
     try:
-        datetime.strptime(message.text, "%Y-%m-%d")  # Проверка формата
+        # Попытка парсинга по первому шаблону
+        try:
+            dt = datetime.strptime(message.text.strip(), "%Y-%m-%d")
+        except ValueError:
+            # Если не получилось, пробуем другой формат
+            try:
+                dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
+            except ValueError:
+                dt = datetime.strptime(message.text.strip(), "%d.%m.%y")
+        new_deadline = dt.strftime("%Y-%m-%d")
         
-        # Получаем сохраненный callback_query из состояния
+        # Получаем сохраненный callback_query из состояния (если он есть)
         user_data = await state.get_data()
         callback_query = user_data.get('callback_query')
         
         if callback_query:
-            # Используем callback_query для сохранения задачи
-            await save_task(callback_query, state, message.text.strip())
+            await save_task(callback_query, state, new_deadline)
         else:
-            # Если callback_query не найден, используем message
-            await save_task(message, state, message.text.strip())
+            await save_task(message, state, new_deadline)
             
     except ValueError:
         # Определяем клавиатуру в зависимости от типа чата
         reply_markup = menu_keyboard if message.chat.type == "private" else group_menu_keyboard
-        await bot.send_message(chat_id=message.chat.id, text="⚠ Ошибка! Введите дату в формате YYYY-MM-DD.", reply_markup=reply_markup)
+        await bot.send_message(chat_id=message.chat.id, text="⚠ Ошибка! Введите дату в формате  или DD.MM.YYYY", reply_markup=reply_markup)
         await state.finish()
 
 async def save_task(message_obj, state: FSMContext, deadline: str):
@@ -486,8 +514,8 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
             f"📌 <b>{task_text}</b>\n"
         )
         if deadline:
-            response += f"⏳ {deadline}"
-            response2 += f"⏳ {deadline}"
+            response += f"⏳ {format_date(deadline)}"
+            response2 += f"⏳ {format_date(deadline)}"
         else:
             response += "⏳ Без срока"
             response2 += "⏳ Без срока"
@@ -551,12 +579,21 @@ def parse_deadline(deadline_str: str) -> str:
             
         return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
     
-    # Проверяем стандартный формат даты
+# Сначала пробуем формат YYYY-MM-DD
     try:
-        datetime.strptime(deadline_str, "%Y-%m-%d")
-        return deadline_str
+        dt = datetime.strptime(deadline_str, "%Y-%m-%d")
+        return dt.strftime("%Y-%m-%d")
     except ValueError:
-        raise ValueError(f"Неверный формат даты: {deadline_str}")
+        # Если не получилось, пробуем формат dd.mm.yyyy
+        try:
+            dt = datetime.strptime(deadline_str, "%d.%m.%Y")
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            try:
+                dt = datetime.strptime(deadline_str, "%d.%m.%y")
+                return dt.strftime("%Y-%m-%d")
+            except ValueError:
+                raise ValueError("Неверный формат даты. Используйте DD.MM.YYYY или YYYY-MM-DD")
 
 
 class QuickTaskCreation(StatesGroup):
@@ -620,13 +657,13 @@ async def process_quick_task(message: types.Message, state: FSMContext):
 
         response = (
             f"📌 <b>{task_text}</b>\n"
-            f"👤 {executor if executor else 'не указан'} ⏳ {deadline if deadline else 'не указан'}"
+            f"👤 {executor if executor else 'не указан'} ⏳ {format_date(deadline) if deadline else 'не указан'}"
         )
 
         response2 = (
             f"🔔 Вам назначена новая задача от {creator[0]}:\n\n"
             f"📌 <b>{task_text}</b>\n"
-            f"⏳ {deadline if deadline else 'не указан'}"
+            f"⏳ {format_date(deadline) if deadline else 'не указан'}"
         )
           
         await bot.send_message(chat_id=message.from_user.id, text=response)
@@ -811,6 +848,13 @@ async def process_status_update(callback_query: types.CallbackQuery, state: FSMC
         _, _, task_id, new_status = callback_query.data.split("_")
         
         cursor = conn.cursor()
+      
+        cursor.execute("SELECT creator_id, task_text FROM tasks WHERE id=?", (task_id,))
+        result = cursor.fetchone()
+        
+        if result:
+            creator, task_text = result
+      
         cursor.execute("""
             INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
             SELECT id, user_id, chat_id, task_text, status, deadline, creator_id 
@@ -821,10 +865,255 @@ async def process_status_update(callback_query: types.CallbackQuery, state: FSMC
         conn.commit()
         
         await bot.send_message(chat_id=callback_query.from_user.id, text=f"✅ Статус задачи {task_id} изменен на '{new_status}'")
+        
+        if creator is not None and creator != str(callback_query.from_user.id) and new_status in ('исполнено', 'удалено'):
+          await bot.send_message(
+              chat_id=creator,
+              text=f"✅ Статус задачи {task_id} ({task_text}) изменен на '{new_status}'"
+          )
+
         await state.finish()
     except Exception as e:
         logger.error(f"Ошибка при изменении статуса: {e}")
         await bot.send_message(chat_id=callback_query.from_user.id, text="⚠ Ошибка при изменении статуса")
+        await state.finish()
+
+# ======================
+# ИЗМЕНИТЬ ТЕКСТ ЗАДАЧИ
+# ======================
+
+class TaskTextEditing(StatesGroup):
+    waiting_for_executor_filter = State()     # Выбор исполнителя для фильтрации задач
+    waiting_for_task_selection = State()      # Выбор задачи из списка (отфильтрованных по исполнителю)
+    waiting_for_task_id = State()             # Ввод ID задачи вручную
+    waiting_for_choice = State()              # Выбор между полной заменой и дополнением текста
+    waiting_for_replacement = State()         # Ввод нового текста (полная замена)
+    waiting_for_append = State()              # Ввод текста для дополнения
+
+@dp.message_handler(lambda message: message.text == "✏️ Изменить задачу")
+async def text_edit_start(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+        return
+    if message.chat.type != "private":
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Команда для ЛС!")
+        return
+
+    cursor = conn.cursor()
+    # Если пользователь — модератор, показываем всех исполнителей, иначе – только исполнителей задач, созданных им
+    if message.from_user.id in MODERATOR_USERS:
+        cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE status NOT IN ('удалено','исполнено') LIMIT 20")
+    else:
+        cursor.execute("SELECT DISTINCT user_id FROM tasks WHERE creator_id=? AND status NOT IN ('удалено','исполнено') LIMIT 20", (message.from_user.id,))
+    executors = cursor.fetchall()
+
+    if not executors:
+        await bot.send_message(chat_id=message.from_user.id, text="❌ Нет задач для изменения")
+        return
+
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    # Собираем кнопки исполнителей
+    buttons = []
+    for (executor,) in executors:
+        if executor:
+            label = f"👤 {executor}"
+            data = executor
+        else:
+            label = "👤 Без исполнителя"
+            data = "none"
+        buttons.append(InlineKeyboardButton(label, callback_data=f"text_edit_executor|{data}"))
+    # Добавляем все кнопки исполнителей в один ряд (если их должно быть два в ряду, row_width=2 будет пытаться их сгруппировать)
+    keyboard.row(*buttons)
+    # Добавляем отдельный ряд для кнопки ручного ввода ID задачи
+    keyboard.row(InlineKeyboardButton("✏️ Ввести ID задачи вручную", callback_data="text_edit_manual_id"))
+    
+    await bot.send_message(
+        chat_id=message.from_user.id,
+        text="Выберите исполнителя для фильтрации задач:",
+        reply_markup=keyboard
+    )
+    await TaskTextEditing.waiting_for_executor_filter.set()
+
+# Обработка выбора исполнителя из списка
+@dp.callback_query_handler(lambda c: c.data.startswith("text_edit_executor|"), state=TaskTextEditing.waiting_for_executor_filter)
+async def process_text_edit_executor(callback_query: types.CallbackQuery, state: FSMContext):
+    # Извлекаем выбранного исполнителя
+    executor = callback_query.data.split("|")[1]
+    await state.update_data(executor=executor)
+    
+    # После выбора исполнителя выводим список задач, отфильтрованных по выбранному исполнителю
+    cursor = conn.cursor()
+    if executor.lower() == "none":
+        if callback_query.from_user.id in MODERATOR_USERS:
+            cursor.execute("SELECT id, task_text FROM tasks WHERE user_id IS NULL AND status NOT IN ('удалено','исполнено') LIMIT 20")
+        else:
+            cursor.execute("SELECT id, task_text FROM tasks WHERE user_id IS NULL AND creator_id=? AND status NOT IN ('удалено','исполнено') LIMIT 20", (callback_query.from_user.id,))
+    else:
+        if callback_query.from_user.id in MODERATOR_USERS:
+            cursor.execute("SELECT id, task_text FROM tasks WHERE user_id=? AND status NOT IN ('удалено','исполнено') LIMIT 20", (executor,))
+        else:
+            cursor.execute("SELECT id, task_text FROM tasks WHERE user_id=? AND creator_id=? AND status NOT IN ('удалено','исполнено') LIMIT 20", (executor, callback_query.from_user.id))
+    tasks = cursor.fetchall()
+    
+    if not tasks:
+        await bot.send_message(chat_id=callback_query.from_user.id, text="❌ Нет задач для выбранного исполнителя.")
+        await state.finish()
+        return
+
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    for task_id, task_text in tasks:
+        preview = (task_text[:30] + "...") if len(task_text) > 30 else task_text
+        keyboard.add(InlineKeyboardButton(f"🔹 {preview} (ID: {task_id})", callback_data=f"text_edit_task_{task_id}"))
+    # Добавляем кнопку для ручного ввода ID задачи
+    keyboard.add(InlineKeyboardButton("✏️ Ввести ID задачи вручную", callback_data="text_edit_manual_id"))
+    
+    await bot.send_message(
+        chat_id=callback_query.message.chat.id,
+        text="Выберите задачу для изменения текста:",
+        reply_markup=keyboard
+    )
+    await TaskTextEditing.waiting_for_task_selection.set()
+    await bot.answer_callback_query(callback_query.id)
+
+@dp.callback_query_handler(lambda c: c.data.startswith("text_edit_task_"), state=TaskTextEditing.waiting_for_task_selection)
+async def process_text_edit_task(callback_query: types.CallbackQuery, state: FSMContext):
+    try:
+        task_id = int(callback_query.data.split("_")[-1])
+    except (ValueError, IndexError):
+        await bot.send_message(chat_id=callback_query.from_user.id, text="⚠ Неверные данные задачи!")
+        await state.finish()
+        return
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT task_text, creator_id FROM tasks WHERE id=?", (task_id,))
+    result = cursor.fetchone()
+    if not result:
+        await bot.send_message(chat_id=callback_query.from_user.id, text="⚠ Задача не найдена!")
+        await state.finish()
+        return
+    current_text, creator_id = result
+    await state.update_data(task_id=task_id, old_text=current_text, creator_id=creator_id)
+    
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton("Полностью заменить", callback_data="text_edit_full"),
+        InlineKeyboardButton("Дополнить текст", callback_data="text_edit_append")
+    )
+    await bot.send_message(
+        chat_id=callback_query.message.chat.id,
+        text=f"<b>Текущий текст задачи:</b>\n{current_text}\n\nВыберите действие:",
+        reply_markup=keyboard,
+        parse_mode=ParseMode.HTML
+    )
+    await TaskTextEditing.waiting_for_choice.set()
+    await bot.answer_callback_query(callback_query.id)
+
+# Обработка ввода ID задачи вручную (на шаге выбора задачи)
+@dp.callback_query_handler(lambda c: c.data == "text_edit_manual_id", state=[TaskTextEditing.waiting_for_executor_filter, TaskTextEditing.waiting_for_task_selection])
+async def ask_manual_text_id(callback_query: types.CallbackQuery, state: FSMContext):
+    await bot.send_message(chat_id=callback_query.from_user.id, text="✏️ Введите ID задачи:")
+    await TaskTextEditing.waiting_for_task_id.set()
+    await bot.answer_callback_query(callback_query.id)
+
+@dp.message_handler(state=TaskTextEditing.waiting_for_task_id)
+async def process_task_id_text_edit(message: types.Message, state: FSMContext):
+    try:
+        task_id = int(message.text.strip())
+    except ValueError:
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Введите корректный числовой ID задачи!")
+        await state.finish()
+        return
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT task_text, creator_id FROM tasks WHERE id=?", (task_id,))
+    result = cursor.fetchone()
+    if not result:
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Задача не найдена!")
+        await state.finish()
+        return
+    current_text, creator_id = result
+    await state.update_data(task_id=task_id, old_text=current_text, creator_id=creator_id)
+    
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton("Полностью заменить", callback_data="text_edit_full"),
+        InlineKeyboardButton("Дополнить текст", callback_data="text_edit_append")
+    )
+    await bot.send_message(chat_id=message.from_user.id,
+                           text=f"Текущий текст задачи:\n{current_text}\n\nВыберите действие:",
+                           reply_markup=keyboard)
+    await TaskTextEditing.waiting_for_choice.set()
+
+@dp.callback_query_handler(lambda c: c.data == "text_edit_full", state=TaskTextEditing.waiting_for_choice)
+async def process_text_edit_choice_full(callback_query: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    creator_id = data.get("creator_id")
+    # Полная замена разрешена только если пользователь – создатель задачи или модератор
+    if int(creator_id) != callback_query.from_user.id and callback_query.from_user.id not in MODERATOR_USERS:
+        await bot.send_message(callback_query.from_user.id,
+                               text="⚠ Полная замена текста доступна только создателю задачи или модераторам!")
+        await state.finish()
+        return
+    await bot.send_message(callback_query.from_user.id,
+                           text="Введите новый текст задачи (старый текст будет полностью заменен):")
+    await TaskTextEditing.waiting_for_replacement.set()
+    await bot.answer_callback_query(callback_query.id)
+
+@dp.message_handler(state=TaskTextEditing.waiting_for_replacement)
+async def process_text_replacement(message: types.Message, state: FSMContext):
+    new_text = message.text.strip()
+    data = await state.get_data()
+    task_id = data.get("task_id")
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
+            SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
+            FROM tasks WHERE id=?
+        """, (task_id,))
+        cursor.execute("UPDATE tasks SET task_text=? WHERE id=?", (new_text, task_id))
+        conn.commit()
+        await bot.send_message(message.chat.id, text=f"✅ Текст задачи {task_id} успешно обновлен.")
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении текста задачи: {e}")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при обновлении текста задачи.")
+    finally:
+        await state.finish()
+
+@dp.callback_query_handler(lambda c: c.data == "text_edit_append", state=TaskTextEditing.waiting_for_choice)
+async def process_text_edit_choice_append(callback_query: types.CallbackQuery, state: FSMContext):
+    await bot.send_message(callback_query.from_user.id,
+                           text="Введите текст, который необходимо добавить в конец текущего описания:")
+    await TaskTextEditing.waiting_for_append.set()
+    await bot.answer_callback_query(callback_query.id)
+
+@dp.message_handler(state=TaskTextEditing.waiting_for_append)
+async def process_text_append(message: types.Message, state: FSMContext):
+    append_text = message.text.strip()
+    data = await state.get_data()
+    task_id = data.get("task_id")
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT task_text FROM tasks WHERE id=?", (task_id,))
+        result = cursor.fetchone()
+        if not result:
+            await bot.send_message(chat_id=message.from_user.id, text="⚠ Задача не найдена!")
+            await state.finish()
+            return
+        old_text = result[0]
+        new_text = old_text + "\n" + append_text
+        cursor.execute("""
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
+            SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
+            FROM tasks WHERE id=?
+        """, (task_id,))
+        cursor.execute("UPDATE tasks SET task_text=? WHERE id=?", (new_text, task_id))
+        conn.commit()
+        await bot.send_message(chat_id=message.from_user.id, text=f"✅ Текст задачи {task_id} успешно дополнен.")
+    except Exception as e:
+        logger.error(f"Ошибка при дополнении текста задачи: {e}")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при дополнении текста задачи.")
+    finally:
         await state.finish()
 
 # ======================
@@ -1235,7 +1524,7 @@ async def show_deadline_options(message_obj):
 async def process_deadline_choice(callback_query: types.CallbackQuery, state: FSMContext):
     """Обработка выбора типа срока"""
     if callback_query.data == "set_deadline_custom":
-        await bot.send_message(chat_id=callback_query.from_user.id, text="📅 Введите дату в формате YYYY-MM-DD:")
+        await bot.send_message(chat_id=callback_query.from_user.id, text="📅 Введите дату в формате YYYY-MM-DD или DD.MM.YYYY:")
         await TaskUpdate.waiting_for_custom_deadline.set()
     else:
         user_data = await state.get_data()
@@ -1273,9 +1562,15 @@ async def process_deadline_choice(callback_query: types.CallbackQuery, state: FS
 async def process_custom_deadline(message: types.Message, state: FSMContext):
     """Обработка ввода даты вручную"""
     try:
-        # Проверка формата даты
-        datetime.strptime(message.text, "%Y-%m-%d")
-        new_deadline = message.text
+        # Пытаемся распарсить дату в одном из поддерживаемых форматов
+        try:
+            dt = datetime.strptime(message.text.strip(), "%Y-%m-%d")
+        except ValueError:
+            try:
+                dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
+            except ValueError:
+                dt = datetime.strptime(message.text.strip(), "%d.%m.%y")
+        new_deadline = dt.strftime("%Y-%m-%d")
         
         user_data = await state.get_data()
         task_id = user_data['task_id']
@@ -1301,7 +1596,7 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
         await bot.send_message(chat_id=message.from_user.id,text=f"✅ Новый срок установлен: {new_deadline}")
         await state.finish()
     except ValueError:
-        await bot.send_message(chat_id=message.from_user.id, text="⚠ Неверный формат даты! Используйте YYYY-MM-DD")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Неверный формат даты! Используйте YYYY-MM-DD или DD.MM.YYYY")
         await state.finish()
 
 # ======================
@@ -1384,7 +1679,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
                     SELECT id, user_id, task_text, status, deadline 
                     FROM tasks 
                     WHERE status NOT IN ('удалено','исполнено') AND user_id IS NULL
-                    ORDER BY id DESC 
+                    ORDER BY deadline ASC, id ASC
                     LIMIT 10 OFFSET ?
                 """, (page * 10,))
             else:
@@ -1392,7 +1687,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
                     SELECT id, user_id, task_text, status, deadline 
                     FROM tasks 
                     WHERE status NOT IN ('удалено','исполнено') AND user_id = ?
-                    ORDER BY id DESC 
+                    ORDER BY deadline ASC, id ASC
                     LIMIT 10 OFFSET ?
                 """, (executor_filter, page * 10))
         else:
@@ -1400,7 +1695,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
                 SELECT id, user_id, task_text, status, deadline 
                 FROM tasks 
                 WHERE status NOT IN ('удалено','исполнено')
-                ORDER BY id DESC 
+                ORDER BY deadline ASC, id ASC
                 LIMIT 10 OFFSET ?
             """, (page * 10,))
         tasks = cursor.fetchall()
@@ -1410,7 +1705,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
             task_id, task_user, task_text, status, deadline = task
             result.append(
                 f"🔹: {task_id} 📝: {task_text}\n\n"
-                f"🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
+                f"🔄: {status} ⏳: {format_date(deadline) if deadline else 'нет срока'}\n"
                 f"──────────"
             )
         keyboard = InlineKeyboardMarkup(row_width=3)
@@ -1515,7 +1810,7 @@ async def list_tasks_by_deadline(message: types.Message):
             row_buttons = []
             for d in row:
                 if d[0]:
-                    btn_text = d[0]
+                    btn_text = format_date(d[0])
                     btn_data = d[0]
                 else:
                     btn_text = "Без срока"
@@ -1566,7 +1861,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
                     SELECT id, user_id, task_text, status, deadline 
                     FROM tasks 
                     WHERE status NOT IN ('удалено','исполнено') AND deadline IS NULL
-                    ORDER BY id DESC 
+                    ORDER BY deadline ASC, id ASC
                     LIMIT 10 OFFSET ?
                 """, (page * 10,))
             else:
@@ -1574,7 +1869,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
                     SELECT id, user_id, task_text, status, deadline 
                     FROM tasks 
                     WHERE status NOT IN ('удалено','исполнено') AND deadline = ?
-                    ORDER BY id DESC 
+                    ORDER BY deadline ASC, id ASC 
                     LIMIT 10 OFFSET ?
                 """, (deadline_filter, page * 10))
         else:
@@ -1582,7 +1877,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
                 SELECT id, user_id, task_text, status, deadline 
                 FROM tasks 
                 WHERE status NOT IN ('удалено','исполнено')
-                ORDER BY id DESC 
+                ORDER BY deadline ASC, id ASC
                 LIMIT 10 OFFSET ?
             """, (page * 10,))
         tasks = cursor.fetchall()
@@ -1592,7 +1887,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
             task_id, task_user, task_text, status, deadline = task
             result.append(
                 f"🔹: {task_id} 📝: {task_text}\n\n"
-                f"👤: {task_user} 🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
+                f"👤: {task_user} 🔄: {status}\n"
                 f"──────────"
             )
         keyboard = InlineKeyboardMarkup(row_width=3)
@@ -1607,7 +1902,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
         header = f"📋 Список задач (страница {page+1} из {total_pages+1})"
         if deadline_filter:
             deadline_display = 'Без срока' if deadline_filter.lower() == 'none' else deadline_filter
-            header = f"📋 Задачи со сроком: <b>{deadline_display}</b> (страница {page+1} из {total_pages+1})"
+            header = f"📋 Задачи со сроком: <b>⏳: {format_date(deadline_display)}</b> (страница {page+1} из {total_pages+1})"
         sent_message = await bot.send_message(
             chat_id=message.chat.id,
             text=header + ":\n\n" + "\n".join(result),
@@ -1674,59 +1969,91 @@ async def export_tasks_to_csv(message: types.Message):
                               status as "Статус", 
                               deadline as "Срок"
                         FROM tasks
-                        WHERE status NOT IN ('удалено','исполнено')
-                        ORDER BY id DESC""")
+                        WHERE status NOT IN ('удалено')
+                        ORDER BY user_id ASC, deadline ASC, id ASC""")
         tasks = cursor.fetchall()
         
         if not tasks:
             await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет задач для экспорта.")
             return
 
-        # Создаем CSV в памяти
-        output = io.BytesIO()
+        # Создаем книгу Excel
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "tasks_export"
         
-        # Используем TextIOWrapper с нужной кодировкой
-        text_buffer = io.TextIOWrapper(
-            output,
-            encoding='utf-8-sig',
-            errors='replace',  # заменяем некодируемые символы
-            newline=''
-        )
-        
-        writer = csv.writer(
-            text_buffer,
-            delimiter=';',  # Указываем нужный разделитель
-            quoting=csv.QUOTE_MINIMAL
-        )
-        
-        # Заголовки столбцов
+        # Задаем заголовки
         headers = ['ID', 'Исполнитель', 'Задача', 'Статус', 'Срок']
-        writer.writerow(headers)
+        ws.append(headers)
         
-        # Данные
-        for task in tasks:
-            # Преобразуем все значения в строки
-            row = [
-                str(item) if item is not None else ''
-                for item in task
-            ]
-            writer.writerow(row)
+        # Определяем стили
+        header_fill = PatternFill(start_color="B7DEE8", end_color="B7DEE8", fill_type="solid")
+        thin_border = Border(
+            left=Side(style="thin", color="000000"),
+            right=Side(style="thin", color="000000"),
+            top=Side(style="thin", color="000000"),
+            bottom=Side(style="thin", color="000000")
+        )
+        header_font = Font(bold=True)
         
-        # Важно: закрыть TextIOWrapper перед использованием буфера
-        text_buffer.flush()
-        text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
+        # Применяем стили к заголовкам
+        for col, cell in enumerate(ws[1], start=1):
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.border = thin_border
+            # Центрирование для заголовка (по желанию)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Записываем данные
+        for row_data in tasks:
+            # Преобразуем значения в строки, если нужно
+            row = [str(item) if item is not None else '' for item in row_data]
+            ws.append(row)
+        
+        # Настройка ширины столбцов
+        ws.column_dimensions['A'].width = 7
+        ws.column_dimensions['B'].width = 18
+        ws.column_dimensions['C'].width = 40
+        ws.column_dimensions['D'].width = 10
+        ws.column_dimensions['E'].width = 12
+
+        # Преобразуем значение ячеек столбца "Срок" (столбец E) к datetime,
+        # затем задаем нужный формат
+        for row in ws.iter_rows(min_row=2, min_col=5, max_col=5):
+            for cell in row:
+                if cell.value:
+                    try:
+                        # Пробуем преобразовать значение в дату, если оно хранится как строка
+                        date_value = datetime.strptime(str(cell.value), "%Y-%m-%d")
+                        cell.value = date_value
+                    except Exception as e:
+                        # Если преобразование не удалось, оставляем исходное значение
+                        pass
+                cell.number_format = 'DD.MM.YYYY'
+
+        # Применяем границы ко всем ячейкам
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=5):
+            for cell in row:
+                cell.border = thin_border
+
+        # Устанавливаем перенос слов для третьего столбца (используем Alignment)
+        for row in ws.iter_rows(min_row=2, min_col=3, max_col=3):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+        # Сохраняем Excel в память
+        output = io.BytesIO()
+        wb.save(output)
         output.seek(0)
         
-        # Создаем временный файл
-        csv_file = InputFile(output, filename="tasks_export.csv")
-        
-        await message.reply_document(
-            document=csv_file
-        )
+        # Отправляем файл в Telegram (используем InputFile)
+        from aiogram.types import InputFile
+        excel_file = InputFile(output, filename="tasks_export.xlsx")
+        await message.reply_document(document=excel_file)
         
     except Exception as e:
-        logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+        logger.error(f"Ошибка при экспорте задач в Excel: {str(e)}", exc_info=True)
+        await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
 # ЭКСПОРТ ЗАДАЧ В CSV (с исполненными)
@@ -1747,58 +2074,90 @@ async def export_tasks_to_csv2(message: types.Message):
                               deadline as "Срок"
                         FROM tasks
                         WHERE status NOT IN ('удалено')
-                        ORDER BY id DESC""")
+                        ORDER BY user_id ASC, deadline ASC, id ASC""")
         tasks = cursor.fetchall()
         
         if not tasks:
             await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет задач для экспорта.")
             return
 
-        # Создаем CSV в памяти
-        output = io.BytesIO()
+        # Создаем книгу Excel
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "tasks_export"
         
-        # Используем TextIOWrapper с нужной кодировкой
-        text_buffer = io.TextIOWrapper(
-            output,
-            encoding='utf-8-sig',
-            errors='replace',  # заменяем некодируемые символы
-            newline=''
-        )
-        
-        writer = csv.writer(
-            text_buffer,
-            delimiter=';',  # Указываем нужный разделитель
-            quoting=csv.QUOTE_MINIMAL
-        )
-        
-        # Заголовки столбцов
+        # Задаем заголовки
         headers = ['ID', 'Исполнитель', 'Задача', 'Статус', 'Срок']
-        writer.writerow(headers)
+        ws.append(headers)
         
-        # Данные
-        for task in tasks:
-            # Преобразуем все значения в строки
-            row = [
-                str(item) if item is not None else ''
-                for item in task
-            ]
-            writer.writerow(row)
+        # Определяем стили
+        header_fill = PatternFill(start_color="B7DEE8", end_color="B7DEE8", fill_type="solid")
+        thin_border = Border(
+            left=Side(style="thin", color="000000"),
+            right=Side(style="thin", color="000000"),
+            top=Side(style="thin", color="000000"),
+            bottom=Side(style="thin", color="000000")
+        )
+        header_font = Font(bold=True)
         
-        # Важно: закрыть TextIOWrapper перед использованием буфера
-        text_buffer.flush()
-        text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
+        # Применяем стили к заголовкам
+        for col, cell in enumerate(ws[1], start=1):
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.border = thin_border
+            # Центрирование для заголовка (по желанию)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Записываем данные
+        for row_data in tasks:
+            # Преобразуем значения в строки, если нужно
+            row = [str(item) if item is not None else '' for item in row_data]
+            ws.append(row)
+        
+        # Настройка ширины столбцов
+        ws.column_dimensions['A'].width = 7
+        ws.column_dimensions['B'].width = 18
+        ws.column_dimensions['C'].width = 40
+        ws.column_dimensions['D'].width = 10
+        ws.column_dimensions['E'].width = 12
+
+        # Преобразуем значение ячеек столбца "Срок" (столбец E) к datetime,
+        # затем задаем нужный формат
+        for row in ws.iter_rows(min_row=2, min_col=5, max_col=5):
+            for cell in row:
+                if cell.value:
+                    try:
+                        # Пробуем преобразовать значение в дату, если оно хранится как строка
+                        date_value = datetime.strptime(str(cell.value), "%Y-%m-%d")
+                        cell.value = date_value
+                    except Exception as e:
+                        # Если преобразование не удалось, оставляем исходное значение
+                        pass
+                cell.number_format = 'DD.MM.YYYY'
+
+        # Применяем границы ко всем ячейкам
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=5):
+            for cell in row:
+                cell.border = thin_border
+
+        # Устанавливаем перенос слов для третьего столбца (используем Alignment)
+        for row in ws.iter_rows(min_row=2, min_col=3, max_col=3):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+        # Сохраняем Excel в память
+        output = io.BytesIO()
+        wb.save(output)
         output.seek(0)
         
-        # Создаем временный файл
-        csv_file = InputFile(output, filename="tasks_export.csv")
-        
-        await message.reply_document(
-            document=csv_file
-        )
+        # Отправляем файл в Telegram (используем InputFile)
+        from aiogram.types import InputFile
+        excel_file = InputFile(output, filename="tasks_export.xlsx")
+        await message.reply_document(document=excel_file)
         
     except Exception as e:
-        logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+        logger.error(f"Ошибка при экспорте задач в Excel: {str(e)}", exc_info=True)
+        await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
 # ЭКСПОРТ ЗАДАЧ В CSV (с удаленными и историей изменений)
@@ -1965,7 +2324,7 @@ async def show_delete_confirmation(message_obj, task_id):
         f"Вы уверены, что хотите удалить задачу?\n\n"
         f"📌 {task_text}\n"
         f"🔄 {status}\n"
-        f"⏳ {deadline if deadline else 'нет срока'}",
+        f"⏳ {format_date(deadline) if deadline else 'нет срока'}",
         reply_markup=keyboard
     )
 
@@ -2221,7 +2580,7 @@ async def check_deadlines():
                     # Отправляем в ЛС создателя (chat_id == user_id)
                     await bot.send_message(
                         chat_id=chat_id,
-                        text=f"⏳ Напоминание о задаче 🔹{task_id}:\n📝: {task_text}\n\n👤: {user_id}\n🔄: {status} ⏳: {deadline}"
+                        text=f"⏳ Напоминание о задаче 🔹{task_id}:\n📝: {task_text}\n\n👤: {user_id}\n🔄: {status} ⏳: {format_date(deadline)}"
                     )
                 except exceptions.BotBlocked:
                     logger.error(f"Пользователь {chat_id} заблокировал бота")
