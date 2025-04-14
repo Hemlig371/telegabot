@@ -18,6 +18,8 @@ from aiohttp import web
 import csv
 import io
 from aiogram.types import InputFile
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 from aiogram.utils import exceptions
 from aiogram.types import ChatMemberUpdated, ChatType
@@ -1754,51 +1756,70 @@ async def export_tasks_to_csv2(message: types.Message):
             await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет задач для экспорта.")
             return
 
-        # Создаем CSV в памяти
-        output = io.BytesIO()
+        # Создаем книгу Excel
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Экспорт задач"
         
-        # Используем TextIOWrapper с нужной кодировкой
-        text_buffer = io.TextIOWrapper(
-            output,
-            encoding='utf-8-sig',
-            errors='replace',  # заменяем некодируемые символы
-            newline=''
-        )
-        
-        writer = csv.writer(
-            text_buffer,
-            delimiter=';',  # Указываем нужный разделитель
-            quoting=csv.QUOTE_MINIMAL
-        )
-        
-        # Заголовки столбцов
+        # Задаем заголовки
         headers = ['ID', 'Исполнитель', 'Задача', 'Статус', 'Срок']
-        writer.writerow(headers)
+        ws.append(headers)
         
-        # Данные
-        for task in tasks:
-            # Преобразуем все значения в строки
-            row = [
-                str(item) if item is not None else ''
-                for item in task
-            ]
-            writer.writerow(row)
+        # Определяем стили
+        header_fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+        thin_border = Border(
+            left=Side(style="thin", color="000000"),
+            right=Side(style="thin", color="000000"),
+            top=Side(style="thin", color="000000"),
+            bottom=Side(style="thin", color="000000")
+        )
+        header_font = Font(bold=True)
         
-        # Важно: закрыть TextIOWrapper перед использованием буфера
-        text_buffer.flush()
-        text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
+        # Применяем стили к заголовкам
+        for col, cell in enumerate(ws[1], start=1):
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.border = thin_border
+            # Центрирование для заголовка (по желанию)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Записываем данные
+        for row_data in tasks:
+            # Преобразуем значения в строки, если нужно
+            row = [str(item) if item is not None else '' for item in row_data]
+            ws.append(row)
+        
+        # Настройка ширины столбцов
+        # Предположим: столбец A – ID, B – Исполнитель (шире), C – Задача, D – Статус, E – Срок
+        ws.column_dimensions['A'].width = 10
+        ws.column_dimensions['B'].width = 30  # второй столбец шире
+        ws.column_dimensions['C'].width = 50
+        ws.column_dimensions['D'].width = 20
+        ws.column_dimensions['E'].width = 15
+        
+        # Устанавливаем перенос слов для второго столбца (используем Alignment)
+        for row in ws.iter_rows(min_row=2, min_col=2, max_col=2):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+                
+        # Применяем границы ко всем ячейкам (по желанию можно задать циклом для всей таблицы)
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=5):
+            for cell in row:
+                cell.border = thin_border
+
+        # Сохраняем Excel в память
+        output = io.BytesIO()
+        wb.save(output)
         output.seek(0)
         
-        # Создаем временный файл
-        csv_file = InputFile(output, filename="tasks_export.csv")
-        
-        await message.reply_document(
-            document=csv_file
-        )
+        # Отправляем файл в Telegram (используем InputFile)
+        from aiogram.types import InputFile
+        excel_file = InputFile(output, filename="tasks_export.xlsx")
+        await message.reply_document(document=excel_file)
         
     except Exception as e:
-        logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+        logger.error(f"Ошибка при экспорте задач в Excel: {str(e)}", exc_info=True)
+        await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
 # ЭКСПОРТ ЗАДАЧ В CSV (с удаленными и историей изменений)
