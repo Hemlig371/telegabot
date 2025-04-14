@@ -1790,22 +1790,11 @@ async def export_tasks_to_csv2(message: types.Message):
             ws.append(row)
         
         # Настройка ширины столбцов
-        # Предположим: столбец A – ID, B – Исполнитель (шире), C – Задача, D – Статус, E – Срок
         ws.column_dimensions['A'].width = 7
         ws.column_dimensions['B'].width = 18
         ws.column_dimensions['C'].width = 40
         ws.column_dimensions['D'].width = 10
         ws.column_dimensions['E'].width = 12
-                
-        # Применяем границы ко всем ячейкам
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=5):
-            for cell in row:
-                cell.border = thin_border
-
-        # Устанавливаем перенос слов для третьего столбца (используем Alignment)
-        for row in ws.iter_rows(min_row=2, min_col=3, max_col=3):
-            for cell in row:
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
 
         # Преобразуем значение ячеек столбца "Срок" (столбец E) к datetime,
         # затем задаем нужный формат
@@ -1820,6 +1809,16 @@ async def export_tasks_to_csv2(message: types.Message):
                         # Если преобразование не удалось, оставляем исходное значение
                         pass
                 cell.number_format = 'DD.MM.YYYY'
+
+        # Применяем границы ко всем ячейкам
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=5):
+            for cell in row:
+                cell.border = thin_border
+
+        # Устанавливаем перенос слов для третьего столбца (используем Alignment)
+        for row in ws.iter_rows(min_row=2, min_col=3, max_col=3):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
 
         # Сохраняем Excel в память
         output = io.BytesIO()
