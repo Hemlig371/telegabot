@@ -1807,11 +1807,19 @@ async def export_tasks_to_csv2(message: types.Message):
             for cell in row:
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
 
-        # Применяем форматирование дат для столбца "Срок"
+        # Преобразуем значение ячеек столбца "Срок" (столбец E) к datetime,
+        # затем задаем нужный формат
         for row in ws.iter_rows(min_row=2, min_col=5, max_col=5):
             for cell in row:
-                # Если значение может быть датой, задаем формат
-                cell.number_format = 'YYYY-MM-DD'
+                if cell.value:
+                    try:
+                        # Пробуем преобразовать значение в дату, если оно хранится как строка
+                        date_value = datetime.strptime(str(cell.value), "%Y-%m-%d")
+                        cell.value = date_value
+                    except Exception as e:
+                        # Если преобразование не удалось, оставляем исходное значение
+                        pass
+                cell.number_format = 'DD.MM.YYYY'
 
         # Сохраняем Excel в память
         output = io.BytesIO()
