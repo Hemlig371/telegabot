@@ -849,8 +849,11 @@ async def process_status_update(callback_query: types.CallbackQuery, state: FSMC
         
         cursor = conn.cursor()
       
-        cursor.execute("SELECT creator_id FROM tasks WHERE id=?", (task_id,))
-        creator = cursor.fetchone()
+        cursor.execute("SELECT creator_id, task_text FROM tasks WHERE id=?", (task_id,))
+        result = cursor.fetchone()
+        
+        if result:
+            creator, task_text = result
       
         cursor.execute("""
             INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
@@ -866,7 +869,7 @@ async def process_status_update(callback_query: types.CallbackQuery, state: FSMC
         if creator is not None and creator[0] is not None and creator[0] != str(callback_query.from_user.id) and new_status in ('исполнено', 'удалено'):
           await bot.send_message(
               chat_id=creator[0],
-              text=f"✅ Статус задачи {task_id} изменен на '{new_status}'"
+              text=f"✅ Статус задачи {task_id} ({task_text}) изменен на '{new_status}'"
           )
 
         await state.finish()
@@ -936,7 +939,7 @@ async def process_text_edit_choice(callback_query: types.CallbackQuery, state: F
     if choice == "text_edit_full":
         # Полная замена доступна только для создателя задачи или модераторов
         if int(creator_id) != callback_query.from_user.id and callback_query.from_user.id not in MODERATOR_USERS:
-            await bot.answer_callback_query(callback_query.id, text="⚠ Полная замена текста доступна только создателю задачи или модераторам!", show_alert=True)
+            await bot.send_message(callback_query.from_user.id, text="⚠ Полная замена текста доступна только создателю задачи или модераторам!")
             await state.finish()
             return
         await bot.send_message(callback_query.from_user.id, text="Введите новый текст задачи (старый текст будет полностью заменен):")
@@ -1562,7 +1565,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
                     SELECT id, user_id, task_text, status, deadline 
                     FROM tasks 
                     WHERE status NOT IN ('удалено','исполнено') AND user_id IS NULL
-                    ORDER BY id DESC 
+                    ORDER BY deadline ASC, id ASC
                     LIMIT 10 OFFSET ?
                 """, (page * 10,))
             else:
@@ -1570,7 +1573,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
                     SELECT id, user_id, task_text, status, deadline 
                     FROM tasks 
                     WHERE status NOT IN ('удалено','исполнено') AND user_id = ?
-                    ORDER BY id DESC 
+                    ORDER BY deadline ASC, id ASC
                     LIMIT 10 OFFSET ?
                 """, (executor_filter, page * 10))
         else:
@@ -1578,7 +1581,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
                 SELECT id, user_id, task_text, status, deadline 
                 FROM tasks 
                 WHERE status NOT IN ('удалено','исполнено')
-                ORDER BY id DESC 
+                ORDER BY deadline ASC, id ASC
                 LIMIT 10 OFFSET ?
             """, (page * 10,))
         tasks = cursor.fetchall()
@@ -1744,7 +1747,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
                     SELECT id, user_id, task_text, status, deadline 
                     FROM tasks 
                     WHERE status NOT IN ('удалено','исполнено') AND deadline IS NULL
-                    ORDER BY id DESC 
+                    ORDER BY deadline ASC, id ASC
                     LIMIT 10 OFFSET ?
                 """, (page * 10,))
             else:
@@ -1752,7 +1755,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
                     SELECT id, user_id, task_text, status, deadline 
                     FROM tasks 
                     WHERE status NOT IN ('удалено','исполнено') AND deadline = ?
-                    ORDER BY id DESC 
+                    ORDER BY deadline ASC, id ASC 
                     LIMIT 10 OFFSET ?
                 """, (deadline_filter, page * 10))
         else:
@@ -1760,7 +1763,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
                 SELECT id, user_id, task_text, status, deadline 
                 FROM tasks 
                 WHERE status NOT IN ('удалено','исполнено')
-                ORDER BY id DESC 
+                ORDER BY deadline ASC, id ASC
                 LIMIT 10 OFFSET ?
             """, (page * 10,))
         tasks = cursor.fetchall()
