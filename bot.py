@@ -126,6 +126,7 @@ menu_keyboard.add(
     KeyboardButton("➕ Новая задача"),
     KeyboardButton("⚡ Быстрая задача"),
     KeyboardButton("🔄 Изменить статус"),
+    KeyboardButton("✏️ Изменить задачу"),
     KeyboardButton("👤 Изменить исполнителя"),
     KeyboardButton("⏳ Изменить срок"),
     KeyboardButton("📋 Список задач"),
@@ -184,6 +185,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="/newtask", description="Создать задачу"),
         BotCommand(command="/quicktask", description="Быстрая задача"),
         BotCommand(command="/setstatus", description="Изменить статус"),
+        BotCommand(command="/settext", description="Изменить задачу"),
         BotCommand(command="/setexecutor", description="Изменить исполнителя"),
         BotCommand(command="/setdeadline", description="Изменить срок"),
         BotCommand(command="/listtasks", description="Список задач"),
@@ -242,6 +244,16 @@ async def cmd_set_status(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Менять статус можно только в ЛС")
         return
     await status_select_task(message)  # Аналогично кнопке "🔄 Изменить статус"
+
+@dp.message_handler(commands=["settext"])
+async def cmd_set_status(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+        return  
+    if message.chat.type != "private":
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Менять статус можно только в ЛС")
+        return
+    await text_edit_start(message)  # Аналогично кнопке "✏️ Изменить задачу"
 
 @dp.message_handler(commands=["setexecutor"])
 async def cmd_set_executor(message: types.Message):
@@ -861,6 +873,130 @@ async def process_status_update(callback_query: types.CallbackQuery, state: FSMC
     except Exception as e:
         logger.error(f"Ошибка при изменении статуса: {e}")
         await bot.send_message(chat_id=callback_query.from_user.id, text="⚠ Ошибка при изменении статуса")
+        await state.finish()
+
+# ======================
+# ИЗМЕНИТЬ ТЕКСТ ЗАДАЧИ
+# ======================
+
+class TaskTextEditing(StatesGroup):
+    waiting_for_task_id = State()
+    waiting_for_choice = State()
+    waiting_for_replacement = State()   # Полная замена текста
+    waiting_for_append = State()        # Дополнение текста
+
+@dp.message_handler(lambda message: message.text == "✏️ Изменить задачу")
+async def text_edit_start(message: types.Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
+        return
+    if message.chat.type != "private":
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Команда для ЛС!")
+        return
+    await bot.send_message(chat_id=message.chat.id, text="Введите ID задачи, текст которой хотите изменить:")
+    await TaskTextEditing.waiting_for_task_id.set()
+
+@dp.message_handler(state=TaskTextEditing.waiting_for_task_id)
+async def process_task_id_text_edit(message: types.Message, state: FSMContext):
+    try:
+        task_id = int(message.text.strip())
+    except ValueError:
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Введите корректный числовой ID задачи!")
+        await state.finish()
+        return
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT task_text, creator_id FROM tasks WHERE id=?", (task_id,))
+    result = cursor.fetchone()
+    if not result:
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Задача не найдена!")
+        await state.finish()
+        return
+    current_text, creator_id = result
+    await state.update_data(task_id=task_id, old_text=current_text, creator_id=creator_id)
+    
+    # Формируем inline-клавиатуру для выбора действия
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton("Полностью заменить", callback_data="text_edit_full"),
+        InlineKeyboardButton("Дополнить текст", callback_data="text_edit_append")
+    )
+    await bot.send_message(
+        chat_id=message.from_user.id,
+        text=f"Текущий текст задачи:\n{current_text}\n\nВыберите действие:",
+        reply_markup=keyboard
+    )
+    await TaskTextEditing.waiting_for_choice.set()
+
+@dp.callback_query_handler(lambda c: c.data in ["text_edit_full", "text_edit_append"], state=TaskTextEditing.waiting_for_choice)
+async def process_text_edit_choice(callback_query: types.CallbackQuery, state: FSMContext):
+    choice = callback_query.data
+    data = await state.get_data()
+    creator_id = data.get("creator_id")
+    if choice == "text_edit_full":
+        # Полная замена доступна только для создателя задачи или модераторов
+        if int(creator_id) != callback_query.from_user.id and callback_query.from_user.id not in MODERATOR_USERS:
+            await bot.answer_callback_query(callback_query.id, text="⚠ Полная замена текста доступна только создателю задачи или модераторам!", show_alert=True)
+            await state.finish()
+            return
+        await bot.send_message(callback_query.from_user.id, text="Введите новый текст задачи (старый текст будет полностью заменен):")
+        await TaskTextEditing.waiting_for_replacement.set()
+    elif choice == "text_edit_append":
+        await bot.send_message(callback_query.from_user.id, text="Введите текст, который необходимо добавить в конец текущего описания:")
+        await TaskTextEditing.waiting_for_append.set()
+    await bot.answer_callback_query(callback_query.id)
+
+@dp.message_handler(state=TaskTextEditing.waiting_for_replacement)
+async def process_text_replacement(message: types.Message, state: FSMContext):
+    new_text = message.text.strip()
+    data = await state.get_data()
+    task_id = data.get("task_id")
+    try:
+        cursor = conn.cursor()
+        # Вносим запись в лог для истории изменений
+        cursor.execute("""
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
+            SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
+            FROM tasks WHERE id=?
+        """, (task_id,))
+        # Полная замена: устанавливаем новый текст
+        cursor.execute("UPDATE tasks SET task_text=? WHERE id=?", (new_text, task_id))
+        conn.commit()
+        await bot.send_message(message.chat.id, text=f"✅ Текст задачи {task_id} успешно обновлен.")
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении текста задачи: {e}")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при обновлении текста задачи.")
+    finally:
+        await state.finish()
+
+@dp.message_handler(state=TaskTextEditing.waiting_for_append)
+async def process_text_append(message: types.Message, state: FSMContext):
+    append_text = message.text.strip()
+    data = await state.get_data()
+    task_id = data.get("task_id")
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT task_text FROM tasks WHERE id=?", (task_id,))
+        result = cursor.fetchone()
+        if not result:
+            await bot.send_message(chat_id=message.from_user.id, text="⚠ Задача не найдена!")
+            await state.finish()
+            return
+        old_text = result[0]
+        # Дополнение: новый текст получается добавлением введенного текста к старому через перенос строки
+        new_text = old_text + "\n" + append_text
+        cursor.execute("""
+            INSERT INTO tasks_log (id, user_id, chat_id, task_text, status, deadline, creator_id)
+            SELECT id, user_id, chat_id, task_text, status, deadline, creator_id
+            FROM tasks WHERE id=?
+        """, (task_id,))
+        cursor.execute("UPDATE tasks SET task_text=? WHERE id=?", (new_text, task_id))
+        conn.commit()
+        await bot.send_message(chat_id=message.from_user.id, text=f"✅ Текст задачи {task_id} успешно дополнен.")
+    except Exception as e:
+        logger.error(f"Ошибка при дополнении текста задачи: {e}")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при дополнении текста задачи.")
+    finally:
         await state.finish()
 
 # ======================
