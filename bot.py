@@ -957,16 +957,15 @@ async def process_text_edit_executor(callback_query: types.CallbackQuery, state:
         await state.finish()
         return
 
-    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard = InlineKeyboardMarkup(row_width=1)
     for task_id, task_text in tasks:
         preview = (task_text[:30] + "...") if len(task_text) > 30 else task_text
         keyboard.add(InlineKeyboardButton(f"🔹 {preview} (ID: {task_id})", callback_data=f"text_edit_task_{task_id}"))
     # Добавляем кнопку для ручного ввода ID задачи
     keyboard.add(InlineKeyboardButton("✏️ Ввести ID задачи вручную", callback_data="text_edit_manual_id"))
     
-    await bot.edit_message_text(
+    await bot.send_message(
         chat_id=callback_query.message.chat.id,
-        message_id=callback_query.message.message_id,
         text="Выберите задачу для изменения текста:",
         reply_markup=keyboard
     )
