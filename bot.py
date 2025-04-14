@@ -331,6 +331,13 @@ async def cancel_handler(message: types.Message, state: FSMContext):
     else:
         await message.reply("Действие отменено. Возвращаемся к стартовому меню.", reply_markup=menu_keyboard)
 
+def format_date(date_str):
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        return dt.strftime("%d.%m.%y")
+    except Exception:
+        return date_str
+
 # ======================
 # СОЗДАНИЕ ЗАДАЧ
 # ======================
@@ -427,18 +434,22 @@ async def process_deadline(callback_query: types.CallbackQuery, state: FSMContex
 async def process_custom_deadline(message: types.Message, state: FSMContext):
     """Обработка ввода собственного срока"""
     try:
-        datetime.strptime(message.text, "%Y-%m-%d")  # Проверка формата
+        # Попытка парсинга по первому шаблону
+        try:
+            dt = datetime.strptime(message.text.strip(), "%Y-%m-%d")
+        except ValueError:
+            # Если не получилось, пробуем другой формат
+            dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
+        new_deadline = dt.strftime("%Y-%m-%d")
         
-        # Получаем сохраненный callback_query из состояния
+        # Получаем сохраненный callback_query из состояния (если он есть)
         user_data = await state.get_data()
         callback_query = user_data.get('callback_query')
         
         if callback_query:
-            # Используем callback_query для сохранения задачи
-            await save_task(callback_query, state, message.text.strip())
+            await save_task(callback_query, state, new_deadline)
         else:
-            # Если callback_query не найден, используем message
-            await save_task(message, state, message.text.strip())
+            await save_task(message, state, new_deadline)
             
     except ValueError:
         # Определяем клавиатуру в зависимости от типа чата
@@ -488,8 +499,8 @@ async def save_task(message_obj, state: FSMContext, deadline: str):
             f"📌 <b>{task_text}</b>\n"
         )
         if deadline:
-            response += f"⏳ {deadline}"
-            response2 += f"⏳ {deadline}"
+            response += f"⏳ {format_date(deadline)}"
+            response2 += f"⏳ {format_date(deadline)}"
         else:
             response += "⏳ Без срока"
             response2 += "⏳ Без срока"
@@ -553,12 +564,17 @@ def parse_deadline(deadline_str: str) -> str:
             
         return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
     
-    # Проверяем стандартный формат даты
+# Сначала пробуем формат YYYY-MM-DD
     try:
-        datetime.strptime(deadline_str, "%Y-%m-%d")
-        return deadline_str
+        dt = datetime.strptime(deadline_str, "%Y-%m-%d")
+        return dt.strftime("%Y-%m-%d")
     except ValueError:
-        raise ValueError(f"Неверный формат даты: {deadline_str}")
+        # Если не получилось, пробуем формат dd.mm.yyyy
+        try:
+            dt = datetime.strptime(deadline_str, "%d.%m.%Y")
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Неверный формат даты. Используйте DD.MM.YYYY или YYYY-MM-DD")
 
 
 class QuickTaskCreation(StatesGroup):
@@ -622,13 +638,13 @@ async def process_quick_task(message: types.Message, state: FSMContext):
 
         response = (
             f"📌 <b>{task_text}</b>\n"
-            f"👤 {executor if executor else 'не указан'} ⏳ {deadline if deadline else 'не указан'}"
+            f"👤 {executor if executor else 'не указан'} ⏳ {format_date(deadline) if deadline else 'не указан'}"
         )
 
         response2 = (
             f"🔔 Вам назначена новая задача от {creator[0]}:\n\n"
             f"📌 <b>{task_text}</b>\n"
-            f"⏳ {deadline if deadline else 'не указан'}"
+            f"⏳ {format_date(deadline) if deadline else 'не указан'}"
         )
           
         await bot.send_message(chat_id=message.from_user.id, text=response)
@@ -1412,7 +1428,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
             task_id, task_user, task_text, status, deadline = task
             result.append(
                 f"🔹: {task_id} 📝: {task_text}\n\n"
-                f"🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
+                f"🔄: {status} ⏳: {format_date(deadline) if deadline else 'нет срока'}\n"
                 f"──────────"
             )
         keyboard = InlineKeyboardMarkup(row_width=3)
@@ -1517,7 +1533,7 @@ async def list_tasks_by_deadline(message: types.Message):
             row_buttons = []
             for d in row:
                 if d[0]:
-                    btn_text = d[0]
+                    btn_text = format_date(d[0])
                     btn_data = d[0]
                 else:
                     btn_text = "Без срока"
@@ -1594,7 +1610,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
             task_id, task_user, task_text, status, deadline = task
             result.append(
                 f"🔹: {task_id} 📝: {task_text}\n\n"
-                f"👤: {task_user} 🔄: {status} ⏳: {deadline if deadline else 'нет срока'}\n"
+                f"👤: {task_user} 🔄: {status} ⏳: {format_date(deadline) if deadline else 'нет срока'}\n"
                 f"──────────"
             )
         keyboard = InlineKeyboardMarkup(row_width=3)
@@ -1609,7 +1625,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
         header = f"📋 Список задач (страница {page+1} из {total_pages+1})"
         if deadline_filter:
             deadline_display = 'Без срока' if deadline_filter.lower() == 'none' else deadline_filter
-            header = f"📋 Задачи со сроком: <b>{deadline_display}</b> (страница {page+1} из {total_pages+1})"
+            header = f"📋 Задачи со сроком: <b>{format_date(deadline_display)}</b> (страница {page+1} из {total_pages+1})"
         sent_message = await bot.send_message(
             chat_id=message.chat.id,
             text=header + ":\n\n" + "\n".join(result),
@@ -2031,7 +2047,7 @@ async def show_delete_confirmation(message_obj, task_id):
         f"Вы уверены, что хотите удалить задачу?\n\n"
         f"📌 {task_text}\n"
         f"🔄 {status}\n"
-        f"⏳ {deadline if deadline else 'нет срока'}",
+        f"⏳ {format_date(deadline) if deadline else 'нет срока'}",
         reply_markup=keyboard
     )
 
@@ -2287,7 +2303,7 @@ async def check_deadlines():
                     # Отправляем в ЛС создателя (chat_id == user_id)
                     await bot.send_message(
                         chat_id=chat_id,
-                        text=f"⏳ Напоминание о задаче 🔹{task_id}:\n📝: {task_text}\n\n👤: {user_id}\n🔄: {status} ⏳: {deadline}"
+                        text=f"⏳ Напоминание о задаче 🔹{task_id}:\n📝: {task_text}\n\n👤: {user_id}\n🔄: {status} ⏳: {format_date(deadline)}"
                     )
                 except exceptions.BotBlocked:
                     logger.error(f"Пользователь {chat_id} заблокировал бота")
