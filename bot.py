@@ -1791,21 +1791,21 @@ async def export_tasks_to_csv2(message: types.Message):
         
         # Настройка ширины столбцов
         # Предположим: столбец A – ID, B – Исполнитель (шире), C – Задача, D – Статус, E – Срок
-        ws.column_dimensions['A'].width = 10
-        ws.column_dimensions['B'].width = 20
+        ws.column_dimensions['A'].width = 7
+        ws.column_dimensions['B'].width = 18
         ws.column_dimensions['C'].width = 50
-        ws.column_dimensions['D'].width = 20
-        ws.column_dimensions['E'].width = 15
-        
+        ws.column_dimensions['D'].width = 10
+        ws.column_dimensions['E'].width = 12
+                
+        # Применяем границы ко всем ячейкам
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=5):
+            for cell in row:
+                cell.border = thin_border
+
         # Устанавливаем перенос слов для второго столбца (используем Alignment)
         for row in ws.iter_rows(min_row=2, min_col=2, max_col=2):
             for cell in row:
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
-                
-        # Применяем границы ко всем ячейкам (по желанию можно задать циклом для всей таблицы)
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=5):
-            for cell in row:
-                cell.border = thin_border
 
         # Сохраняем Excel в память
         output = io.BytesIO()
