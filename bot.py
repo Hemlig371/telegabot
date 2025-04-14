@@ -912,7 +912,8 @@ async def text_edit_start(message: types.Message):
         return
 
     keyboard = InlineKeyboardMarkup(row_width=2)
-    # Формируем кнопки для каждого исполнителя
+    # Собираем кнопки исполнителей
+    buttons = []
     for (executor,) in executors:
         if executor:
             label = f"👤 {executor}"
@@ -920,9 +921,11 @@ async def text_edit_start(message: types.Message):
         else:
             label = "👤 Без исполнителя"
             data = "none"
-        keyboard.add(InlineKeyboardButton(label, callback_data=f"text_edit_executor|{data}"))
-    # Добавляем кнопку для ручного ввода ID задачи (нет варианта ручного ввода исполнителя)
-    keyboard.add(InlineKeyboardButton("✏️ Ввести ID задачи вручную", callback_data="text_edit_manual_id"))
+        buttons.append(InlineKeyboardButton(label, callback_data=f"text_edit_executor|{data}"))
+    # Добавляем все кнопки исполнителей в один ряд (если их должно быть два в ряду, row_width=2 будет пытаться их сгруппировать)
+    keyboard.row(*buttons)
+    # Добавляем отдельный ряд для кнопки ручного ввода ID задачи
+    keyboard.row(InlineKeyboardButton("✏️ Ввести ID задачи вручную", callback_data="text_edit_manual_id"))
     
     await bot.send_message(
         chat_id=message.from_user.id,
@@ -996,9 +999,8 @@ async def process_text_edit_task(callback_query: types.CallbackQuery, state: FSM
         InlineKeyboardButton("Полностью заменить", callback_data="text_edit_full"),
         InlineKeyboardButton("Дополнить текст", callback_data="text_edit_append")
     )
-    await bot.edit_message_text(
+    await bot.send_message(
         chat_id=callback_query.message.chat.id,
-        message_id=callback_query.message.message_id,
         text=f"<b>Текущий текст задачи:</b>\n{current_text}\n\nВыберите действие:",
         reply_markup=keyboard,
         parse_mode=ParseMode.HTML
