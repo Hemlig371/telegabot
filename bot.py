@@ -1963,13 +1963,16 @@ async def export_tasks_to_csv(message: types.Message):
     """Экспорт всех задач в CSV файл с кодировкой win1251"""
     try:
         cursor = conn.cursor()
-        cursor.execute(""" SELECT id, 
-                              user_id as "Исполнитель", 
-                              task_text as "Задача", 
-                              status as "Статус", 
-                              deadline as "Срок"
-                        FROM tasks
-                        WHERE status NOT IN ('удалено')
+        cursor.execute(""" SELECT t.id, 
+                              CASE WHEN u.name IS NULL 
+                                   THEN t.user_id 
+                              ELSE u.name END "Исполнитель", 
+                              t.task_text as "Задача", 
+                              t.status as "Статус", 
+                              t.deadline as "Срок"
+                        FROM tasks t
+                        LEFT JOIN users u ON t.user_id = u.username
+                        WHERE status NOT IN ('удалено', 'исполнено')
                         ORDER BY user_id ASC, deadline ASC, id ASC""")
         tasks = cursor.fetchall()
         
@@ -2067,12 +2070,15 @@ async def export_tasks_to_csv2(message: types.Message):
     """Экспорт всех задач в CSV файл с кодировкой win1251"""
     try:
         cursor = conn.cursor()
-        cursor.execute(""" SELECT id, 
-                              user_id as "Исполнитель", 
-                              task_text as "Задача", 
-                              status as "Статус", 
-                              deadline as "Срок"
-                        FROM tasks
+        cursor.execute(""" SELECT t.id, 
+                              CASE WHEN u.name IS NULL 
+                                   THEN t.user_id 
+                              ELSE u.name END "Исполнитель", 
+                              t.task_text as "Задача", 
+                              t.status as "Статус", 
+                              t.deadline as "Срок"
+                        FROM tasks t
+                        LEFT JOIN users u ON t.user_id = u.username
                         WHERE status NOT IN ('удалено')
                         ORDER BY user_id ASC, deadline ASC, id ASC""")
         tasks = cursor.fetchall()
