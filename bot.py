@@ -1676,59 +1676,91 @@ async def export_tasks_to_csv(message: types.Message):
                               status as "Статус", 
                               deadline as "Срок"
                         FROM tasks
-                        WHERE status NOT IN ('удалено','исполнено')
-                        ORDER BY id DESC""")
+                        WHERE status NOT IN ('удалено')
+                        ORDER BY user_id ASC, deadline ASC, id ASC""")
         tasks = cursor.fetchall()
         
         if not tasks:
             await bot.send_message(chat_id=message.from_user.id, text="📭 В базе нет задач для экспорта.")
             return
 
-        # Создаем CSV в памяти
-        output = io.BytesIO()
+        # Создаем книгу Excel
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "tasks_export"
         
-        # Используем TextIOWrapper с нужной кодировкой
-        text_buffer = io.TextIOWrapper(
-            output,
-            encoding='utf-8-sig',
-            errors='replace',  # заменяем некодируемые символы
-            newline=''
-        )
-        
-        writer = csv.writer(
-            text_buffer,
-            delimiter=';',  # Указываем нужный разделитель
-            quoting=csv.QUOTE_MINIMAL
-        )
-        
-        # Заголовки столбцов
+        # Задаем заголовки
         headers = ['ID', 'Исполнитель', 'Задача', 'Статус', 'Срок']
-        writer.writerow(headers)
+        ws.append(headers)
         
-        # Данные
-        for task in tasks:
-            # Преобразуем все значения в строки
-            row = [
-                str(item) if item is not None else ''
-                for item in task
-            ]
-            writer.writerow(row)
+        # Определяем стили
+        header_fill = PatternFill(start_color="B7DEE8", end_color="B7DEE8", fill_type="solid")
+        thin_border = Border(
+            left=Side(style="thin", color="000000"),
+            right=Side(style="thin", color="000000"),
+            top=Side(style="thin", color="000000"),
+            bottom=Side(style="thin", color="000000")
+        )
+        header_font = Font(bold=True)
         
-        # Важно: закрыть TextIOWrapper перед использованием буфера
-        text_buffer.flush()
-        text_buffer.detach()  # Отсоединяем TextIOWrapper от BytesIO
+        # Применяем стили к заголовкам
+        for col, cell in enumerate(ws[1], start=1):
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.border = thin_border
+            # Центрирование для заголовка (по желанию)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Записываем данные
+        for row_data in tasks:
+            # Преобразуем значения в строки, если нужно
+            row = [str(item) if item is not None else '' for item in row_data]
+            ws.append(row)
+        
+        # Настройка ширины столбцов
+        ws.column_dimensions['A'].width = 7
+        ws.column_dimensions['B'].width = 18
+        ws.column_dimensions['C'].width = 40
+        ws.column_dimensions['D'].width = 10
+        ws.column_dimensions['E'].width = 12
+
+        # Преобразуем значение ячеек столбца "Срок" (столбец E) к datetime,
+        # затем задаем нужный формат
+        for row in ws.iter_rows(min_row=2, min_col=5, max_col=5):
+            for cell in row:
+                if cell.value:
+                    try:
+                        # Пробуем преобразовать значение в дату, если оно хранится как строка
+                        date_value = datetime.strptime(str(cell.value), "%Y-%m-%d")
+                        cell.value = date_value
+                    except Exception as e:
+                        # Если преобразование не удалось, оставляем исходное значение
+                        pass
+                cell.number_format = 'DD.MM.YYYY'
+
+        # Применяем границы ко всем ячейкам
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=5):
+            for cell in row:
+                cell.border = thin_border
+
+        # Устанавливаем перенос слов для третьего столбца (используем Alignment)
+        for row in ws.iter_rows(min_row=2, min_col=3, max_col=3):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+        # Сохраняем Excel в память
+        output = io.BytesIO()
+        wb.save(output)
         output.seek(0)
         
-        # Создаем временный файл
-        csv_file = InputFile(output, filename="tasks_export.csv")
-        
-        await message.reply_document(
-            document=csv_file
-        )
+        # Отправляем файл в Telegram (используем InputFile)
+        from aiogram.types import InputFile
+        excel_file = InputFile(output, filename="tasks_export.xlsx")
+        await message.reply_document(document=excel_file)
         
     except Exception as e:
-        logger.error(f"Ошибка при экспорте задач: {str(e)}", exc_info=True)
-        await bot.send_message(chat_id=message.from_user.id,text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
+        logger.error(f"Ошибка при экспорте задач в Excel: {str(e)}", exc_info=True)
+        await bot.send_message(chat_id=message.from_user.id, text=f"⚠ Ошибка при создании файла экспорта: {str(e)}")
 
 # ======================
 # ЭКСПОРТ ЗАДАЧ В CSV (с исполненными)
@@ -1749,7 +1781,7 @@ async def export_tasks_to_csv2(message: types.Message):
                               deadline as "Срок"
                         FROM tasks
                         WHERE status NOT IN ('удалено')
-                        ORDER BY user_id ASC, deadline ASC""")
+                        ORDER BY user_id ASC, deadline ASC, id ASC""")
         tasks = cursor.fetchall()
         
         if not tasks:
