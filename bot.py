@@ -251,7 +251,7 @@ async def cmd_set_status(message: types.Message):
         await bot.send_message(chat_id=message.from_user.id, text="⛔ Доступ запрещен")
         return  
     if message.chat.type != "private":
-        await bot.send_message(chat_id=message.from_user.id, text="⛔ Менять статус можно только в ЛС")
+        await bot.send_message(chat_id=message.from_user.id, text="⛔ Менять задачу можно только в ЛС")
         return
     await text_edit_start(message)  # Аналогично кнопке "✏️ Изменить задачу"
 
