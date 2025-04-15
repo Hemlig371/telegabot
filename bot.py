@@ -607,22 +607,28 @@ def parse_deadline(deadline_str: str) -> str:
     # Попытка парсинга по первому шаблону
     try:
         dt = datetime.strptime(deadline_str, "%Y-%m-%d %H:%M")
+        return dt.strftime("%Y-%m-%d %H:%M")
     except ValueError:
         try:
             dt = datetime.strptime(deadline_str, "%d.%m.%Y %H:%M")
+            return dt.strftime("%Y-%m-%d %H:%M")
         except ValueError:
             try:
                 dt = datetime.strptime(deadline_str, "%d.%m.%y %H:%M")
+                return dt.strftime("%Y-%m-%d %H:%M")
             except ValueError:
                 try:
                     dt = datetime.strptime(deadline_str, "%Y-%m-%d")
+                    return dt.strftime("%Y-%m-%d")
                 except ValueError:
                     # Если не получилось, пробуем другой формат
                     try:
                         dt = datetime.strptime(deadline_str, "%d.%m.%Y")
+                        return dt.strftime("%Y-%m-%d")
                     except ValueError:
                         try:
                             dt = datetime.strptime(deadline_str, "%d.%m.%y")
+                            return dt.strftime("%Y-%m-%d")
                         except ValueError:
                             raise ValueError("Неверный формат даты. Используйте DD.MM.YYYY или YYYY-MM-DD")
 
@@ -1719,7 +1725,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
                     SELECT id, user_id, task_text, status, deadline 
                     FROM tasks 
                     WHERE status NOT IN ('удалено','исполнено') AND user_id IS NULL
-                    ORDER BY deadline ASC, id ASC
+                    ORDER BY datetime(deadline) ASC, id ASC
                     LIMIT 10 OFFSET ?
                 """, (page * 10,))
             else:
@@ -1727,7 +1733,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
                     SELECT id, user_id, task_text, status, deadline 
                     FROM tasks 
                     WHERE status NOT IN ('удалено','исполнено') AND user_id = ?
-                    ORDER BY deadline ASC, id ASC
+                    ORDER BY datetime(deadline) ASC, id ASC
                     LIMIT 10 OFFSET ?
                 """, (executor_filter, page * 10))
         else:
@@ -1735,7 +1741,7 @@ async def show_tasks_page(message: types.Message, user_id: int, page: int, execu
                 SELECT id, user_id, task_text, status, deadline 
                 FROM tasks 
                 WHERE status NOT IN ('удалено','исполнено')
-                ORDER BY deadline ASC, id ASC
+                ORDER BY datetime(deadline) ASC, id ASC
                 LIMIT 10 OFFSET ?
             """, (page * 10,))
         tasks = cursor.fetchall()
@@ -1835,9 +1841,9 @@ async def list_tasks_by_deadline(message: types.Message):
         cursor = conn.cursor()
         # Получаем уникальные сроки. Если срок отсутствует (NULL), то можно отобразить вариант "Без срока"
         cursor.execute("""
-            SELECT DISTINCT deadline FROM tasks 
+            SELECT DISTINCT date(deadline) deadline FROM tasks 
             WHERE status NOT IN ('удалено', 'исполнено')
-            ORDER BY deadline ASC
+            ORDER BY datetime(deadline) ASC
             LIMIT 20
         """)
         deadlines = cursor.fetchall()
@@ -1883,7 +1889,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
         if deadline_filter and deadline_filter.lower() == "none":
             cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND deadline IS NULL")
         elif deadline_filter:
-            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND deadline = ?", (deadline_filter,))
+            cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено') AND date(deadline) = ?", (deadline_filter,))
         else:
             cursor.execute("SELECT COUNT(*) FROM tasks WHERE status NOT IN ('удалено','исполнено')")
         total_tasks = cursor.fetchone()[0]
@@ -1901,15 +1907,15 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
                     SELECT id, user_id, task_text, status, deadline 
                     FROM tasks 
                     WHERE status NOT IN ('удалено','исполнено') AND deadline IS NULL
-                    ORDER BY deadline ASC, id ASC
+                    ORDER BY datetime(deadline) ASC, id ASC
                     LIMIT 10 OFFSET ?
                 """, (page * 10,))
             else:
                 cursor.execute("""
                     SELECT id, user_id, task_text, status, deadline 
                     FROM tasks 
-                    WHERE status NOT IN ('удалено','исполнено') AND deadline = ?
-                    ORDER BY deadline ASC, id ASC 
+                    WHERE status NOT IN ('удалено','исполнено') AND date(deadline) = ?
+                    ORDER BY datetime(deadline) ASC, id ASC 
                     LIMIT 10 OFFSET ?
                 """, (deadline_filter, page * 10))
         else:
@@ -1917,7 +1923,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
                 SELECT id, user_id, task_text, status, deadline 
                 FROM tasks 
                 WHERE status NOT IN ('удалено','исполнено')
-                ORDER BY deadline ASC, id ASC
+                ORDER BY datetime(deadline) ASC, id ASC
                 LIMIT 10 OFFSET ?
             """, (page * 10,))
         tasks = cursor.fetchall()
@@ -2013,7 +2019,7 @@ async def export_tasks_to_csv(message: types.Message):
                         FROM tasks t
                         LEFT JOIN users u ON t.user_id = u.username
                         WHERE status NOT IN ('удалено', 'исполнено')
-                        ORDER BY user_id ASC, deadline ASC, id ASC""")
+                        ORDER BY user_id ASC, datetime(deadline) ASC, id ASC""")
         tasks = cursor.fetchall()
         
         if not tasks:
@@ -2057,7 +2063,7 @@ async def export_tasks_to_csv(message: types.Message):
         ws.column_dimensions['A'].width = 6
         ws.column_dimensions['B'].width = 25
         ws.column_dimensions['C'].width = 40
-        ws.column_dimensions['D'].width = 15
+        ws.column_dimensions['D'].width = 20
         ws.column_dimensions['E'].width = 12
 
         # Преобразуем значение ячеек столбца "Срок" (столбец E) к datetime,
@@ -2066,13 +2072,21 @@ async def export_tasks_to_csv(message: types.Message):
             for cell in row:
                 if cell.value:
                     try:
-                        # Пробуем преобразовать значение в дату, если оно хранится как строка
-                        date_value = datetime.strptime(str(cell.value), "%Y-%m-%d")
-                        cell.value = date_value
-                    except Exception as e:
-                        # Если преобразование не удалось, оставляем исходное значение
-                        pass
-                cell.number_format = 'DD.MM.YYYY'
+                        # Сначала пытаемся преобразовать значение как дату со временем
+                        date_value = datetime.strptime(str(cell.value), "%Y-%m-%d %H:%M")
+                    except Exception:
+                        try:
+                            # Если не получилось, пробуем преобразовать как дату без времени
+                            date_value = datetime.strptime(str(cell.value), "%Y-%m-%d")
+                        except Exception:
+                            # Если преобразование не удалось, оставляем значение без изменений
+                            continue
+                    cell.value = date_value
+                    # Если время задано (не равно 00:00), устанавливаем формат с временем
+                    if date_value.hour != 0 or date_value.minute != 0:
+                        cell.number_format = 'DD.MM.YYYY HH:MM'
+                    else:
+                        cell.number_format = 'DD.MM.YYYY'
 
         # Применяем границы ко всем ячейкам
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=5):
@@ -2120,7 +2134,7 @@ async def export_tasks_to_csv2(message: types.Message):
                         FROM tasks t
                         LEFT JOIN users u ON t.user_id = u.username
                         WHERE status NOT IN ('удалено')
-                        ORDER BY user_id ASC, deadline ASC, id ASC""")
+                        ORDER BY user_id ASC, datetime(deadline) ASC, id ASC""")
         tasks = cursor.fetchall()
         
         if not tasks:
@@ -2164,7 +2178,7 @@ async def export_tasks_to_csv2(message: types.Message):
         ws.column_dimensions['A'].width = 6
         ws.column_dimensions['B'].width = 25
         ws.column_dimensions['C'].width = 40
-        ws.column_dimensions['D'].width = 15
+        ws.column_dimensions['D'].width = 20
         ws.column_dimensions['E'].width = 12
 
         # Преобразуем значение ячеек столбца "Срок" (столбец E) к datetime,
@@ -2173,13 +2187,21 @@ async def export_tasks_to_csv2(message: types.Message):
             for cell in row:
                 if cell.value:
                     try:
-                        # Пробуем преобразовать значение в дату, если оно хранится как строка
-                        date_value = datetime.strptime(str(cell.value), "%Y-%m-%d")
-                        cell.value = date_value
-                    except Exception as e:
-                        # Если преобразование не удалось, оставляем исходное значение
-                        pass
-                cell.number_format = 'DD.MM.YYYY'
+                        # Сначала пытаемся преобразовать значение как дату со временем
+                        date_value = datetime.strptime(str(cell.value), "%Y-%m-%d %H:%M")
+                    except Exception:
+                        try:
+                            # Если не получилось, пробуем преобразовать как дату без времени
+                            date_value = datetime.strptime(str(cell.value), "%Y-%m-%d")
+                        except Exception:
+                            # Если преобразование не удалось, оставляем значение без изменений
+                            continue
+                    cell.value = date_value
+                    # Если время задано (не равно 00:00), устанавливаем формат с временем
+                    if date_value.hour != 0 or date_value.minute != 0:
+                        cell.number_format = 'DD.MM.YYYY HH:MM'
+                    else:
+                        cell.number_format = 'DD.MM.YYYY'
 
         # Применяем границы ко всем ячейкам
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=5):
