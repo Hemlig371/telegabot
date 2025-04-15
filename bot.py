@@ -1826,6 +1826,19 @@ async def process_tasks_pagination(callback_query: types.CallbackQuery):
 current_page_deadline = {}
 current_filters_deadline = {}
 
+def format_deadline_time(deadline_str):
+    try:
+        # Сначала пробуем распарсить срок как дату со временем
+        dt = datetime.strptime(deadline_str, "%Y-%m-%d %H:%M")
+    except Exception:
+        return ""
+
+    # Если время задано (не 00:00), возвращаем только время
+    if dt.hour != 0 or dt.minute != 0:
+        return dt.strftime("%H:%M")
+    else:
+        return ""
+
 @dp.message_handler(lambda message: message.text == "📋 Список (по сроку)")
 async def list_tasks_by_deadline(message: types.Message):
     if message.from_user.id not in ALLOWED_USERS:
@@ -1933,7 +1946,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
             task_id, task_user, task_text, status, deadline = task
             result.append(
                 f"🔹: {task_id} 📝: {task_text}\n\n"
-                f"👤: {task_user} 🔄: {status}\n"
+                f"👤: {task_user} 🔄: {status} ⏳: {format_deadline_time(deadline) if deadline else ''}\n"
                 f"──────────"
             )
         keyboard = InlineKeyboardMarkup(row_width=3)
@@ -2032,7 +2045,7 @@ async def export_tasks_to_csv(message: types.Message):
         ws.title = "tasks_export"
         
         # Задаем заголовки
-        headers = ['ID', 'Исполнитель', 'Задача', 'Статус', 'Срок']
+        headers = ['№', 'Исполнитель', 'Задача', 'Статус', 'Срок']
         ws.append(headers)
         
         # Определяем стили
@@ -2062,9 +2075,9 @@ async def export_tasks_to_csv(message: types.Message):
         # Настройка ширины столбцов
         ws.column_dimensions['A'].width = 6
         ws.column_dimensions['B'].width = 25
-        ws.column_dimensions['C'].width = 40
+        ws.column_dimensions['C'].width = 45
         ws.column_dimensions['D'].width = 20
-        ws.column_dimensions['E'].width = 12
+        ws.column_dimensions['E'].width = 16
 
         # Преобразуем значение ячеек столбца "Срок" (столбец E) к datetime,
         # затем задаем нужный формат
@@ -2147,7 +2160,7 @@ async def export_tasks_to_csv2(message: types.Message):
         ws.title = "tasks_export"
         
         # Задаем заголовки
-        headers = ['ID', 'Исполнитель', 'Задача', 'Статус', 'Срок']
+        headers = ['№', 'Исполнитель', 'Задача', 'Статус', 'Срок']
         ws.append(headers)
         
         # Определяем стили
@@ -2177,9 +2190,9 @@ async def export_tasks_to_csv2(message: types.Message):
         # Настройка ширины столбцов
         ws.column_dimensions['A'].width = 6
         ws.column_dimensions['B'].width = 25
-        ws.column_dimensions['C'].width = 40
+        ws.column_dimensions['C'].width = 45
         ws.column_dimensions['D'].width = 20
-        ws.column_dimensions['E'].width = 12
+        ws.column_dimensions['E'].width = 16
 
         # Преобразуем значение ячеек столбца "Срок" (столбец E) к datetime,
         # затем задаем нужный формат
