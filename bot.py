@@ -112,9 +112,15 @@ def init_db():
         logger.error(f"Ошибка при инициализации БД: {e}")
         raise
 
+# Для фоновых задач
+def create_db_connection():
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
+
 conn = init_db()
 update_allowed_users(conn)
 update_moderator_users(conn)
+
+background_conn = create_db_connection()
 
 # ======================
 # КЛАВИАТУРЫ И ИНТЕРФЕЙС
@@ -2573,7 +2579,7 @@ async def check_deadlines():
     while True:
         try:
             now = datetime.now().strftime("%Y-%m-%d")
-            cursor = conn.cursor()
+            cursor = background_conn.cursor()
             cursor.execute(
                 "SELECT id, chat_id, task_text, user_id, status, deadline FROM tasks "
                 "WHERE deadline<=? AND status NOT IN ('исполнено','удалено')", 
