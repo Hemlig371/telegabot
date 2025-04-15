@@ -351,10 +351,20 @@ async def cancel_handler(message: types.Message, state: FSMContext):
 
 def format_date(date_str):
     try:
-        dt = datetime.strptime(date_str, "%Y-%m-%d")
-        return dt.strftime("%d.%m.%Y")
+        # Пытаемся распарсить срок как дату со временем
+        dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M")
     except Exception:
-        return date_str
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+        except Exception:
+            return date_str
+
+    # Если время равно 00:00, выводим только дату
+    if dt.hour == 0 and dt.minute == 0:
+        return dt.strftime("%d.%m.%Y")
+    else:
+        # Выводим дату с временем в скобках, например "10.05.2025 (12:30)"
+        return f"{dt.strftime('%d.%m.%Y')} ({dt.strftime('%H:%M')})"
 
 # ======================
 # СОЗДАНИЕ ЗАДАЧ
@@ -454,14 +464,23 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
     try:
         # Попытка парсинга по первому шаблону
         try:
-            dt = datetime.strptime(message.text.strip(), "%Y-%m-%d")
+            dt = datetime.strptime(message.text.strip(), "%Y-%m-%d %H:%M")
         except ValueError:
-            # Если не получилось, пробуем другой формат
             try:
-                dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
+                dt = datetime.strptime(message.text.strip(), "%d.%m.%Y %H:%M")
             except ValueError:
-                dt = datetime.strptime(message.text.strip(), "%d.%m.%y")
-        new_deadline = dt.strftime("%Y-%m-%d")
+                try:
+                    dt = datetime.strptime(message.text.strip(), "%d.%m.%y %H:%M")
+                except ValueError:
+                    try:
+                        dt = datetime.strptime(message.text.strip(), "%Y-%m-%d")
+                    except ValueError:
+                        # Если не получилось, пробуем другой формат
+                        try:
+                            dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
+                        except ValueError:
+                            dt = datetime.strptime(message.text.strip(), "%d.%m.%y")
+        new_deadline = dt.strftime("%Y-%m-%d %H:%M")
         
         # Получаем сохраненный callback_query из состояния (если он есть)
         user_data = await state.get_data()
@@ -584,23 +603,28 @@ def parse_deadline(deadline_str: str) -> str:
             days_ahead += 7
             
         return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
-    
-# Сначала пробуем формат YYYY-MM-DD
+
+    # Попытка парсинга по первому шаблону
     try:
-        dt = datetime.strptime(deadline_str, "%Y-%m-%d")
-        return dt.strftime("%Y-%m-%d")
+        dt = datetime.strptime(deadline_str, "%Y-%m-%d %H:%M")
     except ValueError:
-        # Если не получилось, пробуем формат dd.mm.yyyy
         try:
-            dt = datetime.strptime(deadline_str, "%d.%m.%Y")
-            return dt.strftime("%Y-%m-%d")
+            dt = datetime.strptime(deadline_str, "%d.%m.%Y %H:%M")
         except ValueError:
             try:
-                dt = datetime.strptime(deadline_str, "%d.%m.%y")
-                return dt.strftime("%Y-%m-%d")
+                dt = datetime.strptime(deadline_str, "%d.%m.%y %H:%M")
             except ValueError:
-                raise ValueError("Неверный формат даты. Используйте DD.MM.YYYY или YYYY-MM-DD")
-
+                try:
+                    dt = datetime.strptime(deadline_str, "%Y-%m-%d")
+                except ValueError:
+                    # Если не получилось, пробуем другой формат
+                    try:
+                        dt = datetime.strptime(deadline_str, "%d.%m.%Y")
+                    except ValueError:
+                        try:
+                            dt = datetime.strptime(deadline_str, "%d.%m.%y")
+                        except ValueError:
+                            raise ValueError("Неверный формат даты. Используйте DD.MM.YYYY или YYYY-MM-DD")
 
 class QuickTaskCreation(StatesGroup):
     waiting_for_full_data = State()
@@ -1568,15 +1592,25 @@ async def process_deadline_choice(callback_query: types.CallbackQuery, state: FS
 async def process_custom_deadline(message: types.Message, state: FSMContext):
     """Обработка ввода даты вручную"""
     try:
-        # Пытаемся распарсить дату в одном из поддерживаемых форматов
+        # Попытка парсинга по первому шаблону
         try:
-            dt = datetime.strptime(message.text.strip(), "%Y-%m-%d")
+            dt = datetime.strptime(message.text.strip(), "%Y-%m-%d %H:%M")
         except ValueError:
             try:
-                dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
+                dt = datetime.strptime(message.text.strip(), "%d.%m.%Y %H:%M")
             except ValueError:
-                dt = datetime.strptime(message.text.strip(), "%d.%m.%y")
-        new_deadline = dt.strftime("%Y-%m-%d")
+                try:
+                    dt = datetime.strptime(message.text.strip(), "%d.%m.%y %H:%M")
+                except ValueError:
+                    try:
+                        dt = datetime.strptime(message.text.strip(), "%Y-%m-%d")
+                    except ValueError:
+                        # Если не получилось, пробуем другой формат
+                        try:
+                            dt = datetime.strptime(message.text.strip(), "%d.%m.%Y")
+                        except ValueError:
+                            dt = datetime.strptime(message.text.strip(), "%d.%m.%y")
+        new_deadline = dt.strftime("%Y-%m-%d %H:%M")
         
         user_data = await state.get_data()
         task_id = user_data['task_id']
@@ -2020,10 +2054,10 @@ async def export_tasks_to_csv(message: types.Message):
             ws.append(row)
         
         # Настройка ширины столбцов
-        ws.column_dimensions['A'].width = 7
-        ws.column_dimensions['B'].width = 18
+        ws.column_dimensions['A'].width = 6
+        ws.column_dimensions['B'].width = 25
         ws.column_dimensions['C'].width = 40
-        ws.column_dimensions['D'].width = 10
+        ws.column_dimensions['D'].width = 15
         ws.column_dimensions['E'].width = 12
 
         # Преобразуем значение ячеек столбца "Срок" (столбец E) к datetime,
@@ -2127,10 +2161,10 @@ async def export_tasks_to_csv2(message: types.Message):
             ws.append(row)
         
         # Настройка ширины столбцов
-        ws.column_dimensions['A'].width = 7
-        ws.column_dimensions['B'].width = 18
+        ws.column_dimensions['A'].width = 6
+        ws.column_dimensions['B'].width = 25
         ws.column_dimensions['C'].width = 40
-        ws.column_dimensions['D'].width = 10
+        ws.column_dimensions['D'].width = 15
         ws.column_dimensions['E'].width = 12
 
         # Преобразуем значение ячеек столбца "Срок" (столбец E) к datetime,
