@@ -656,8 +656,8 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         
         # Парсим данные с помощью регулярных выражений
         task_match = re.search(r'^(.*?)(\s@|$)', text)
-        executor_match = re.search(r'(@[^//]+)', text)
-        deadline_match = re.search(r'//(\S+)', text)
+        executor_match = re.search(r'(@[^\s]+)', text)
+        deadline_match = re.search(r'//\s*(.+)', text)
         deadline_raw = deadline_match.group(1) if deadline_match else None
 
         task_text = task_match.group(1).strip() if task_match else None
