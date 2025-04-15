@@ -655,7 +655,7 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         text = message.text if message.text else message.caption
         
         # Парсим данные с помощью регулярных выражений
-        if text.startswith('@'):
+        if text and text.startswith('@'):
             # Захватить всё до появления '//' или до конца строки.
             task_match = re.search(r'^(.*?)(?=//|$)', text)
         else:
@@ -722,7 +722,7 @@ async def process_quick_task(message: types.Message, state: FSMContext):
         await bot.send_message(chat_id=message.from_user.id, text="⚠ Ошибка при сохранении задачи")
     except Exception as e:
         logger.error(f"Ошибка: {str(e)}")
-        await bot.send_message(chat_id=message.from_user.id, text="⚠ Неверный формат данных")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Неверный формат данных/У исполнителя нет диалога с ботом")
     finally:
         await state.finish()
 
