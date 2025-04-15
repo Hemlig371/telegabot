@@ -652,7 +652,7 @@ async def quick_task_start(message: types.Message):
 async def process_quick_task(message: types.Message, state: FSMContext):
     """Обработка быстрого создания задачи"""
     try:
-        text = message.text if message.text else message.caption
+        text = message.text if message.text else (message.caption if message.caption else "")
         
         # Парсим данные с помощью регулярных выражений
         if text and text.startswith('@'):
