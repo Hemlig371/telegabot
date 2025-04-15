@@ -1946,7 +1946,7 @@ async def show_tasks_page_by_deadline(message: types.Message, user_id: int, page
             task_id, task_user, task_text, status, deadline = task
             result.append(
                 f"🔹: {task_id} 📝: {task_text}\n\n"
-                f"👤: {task_user} 🔄: {status} {'⏳: ' + format_deadline_time(deadline) if deadline else ''}\n"
+                f"👤: {task_user} 🔄: {status} {'⏳: ' + format_deadline_time(deadline) if format_deadline_time(deadline).strip() else ''}\n"
                 f"──────────"
             )
         keyboard = InlineKeyboardMarkup(row_width=3)
