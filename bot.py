@@ -450,7 +450,7 @@ async def process_deadline(callback_query: types.CallbackQuery, state: FSMContex
     if callback_query.data == "set_deadline_custom":
         # Сохраняем callback_query в состоянии
         await state.update_data(callback_query=callback_query)
-        await bot.send_message(chat_id=callback_query.from_user.id, text="⏳ Введите срок в формате YYYY-MM-DD или DD.MM.YYYY:")
+        await bot.send_message(chat_id=callback_query.from_user.id, text="⏳ Введите срок в формате DD.MM.YYYY:")
         return
     elif callback_query.data == "set_deadline_none":
         await save_task(callback_query, state, deadline=None)
@@ -630,7 +630,7 @@ def parse_deadline(deadline_str: str) -> str:
                             dt = datetime.strptime(deadline_str, "%d.%m.%y")
                             return dt.strftime("%Y-%m-%d")
                         except ValueError:
-                            raise ValueError("Неверный формат даты. Используйте DD.MM.YYYY или YYYY-MM-DD")
+                            raise ValueError("Неверный формат даты. Используйте DD.MM.YYYY")
 
 class QuickTaskCreation(StatesGroup):
     waiting_for_full_data = State()
@@ -652,10 +652,15 @@ async def quick_task_start(message: types.Message):
 async def process_quick_task(message: types.Message, state: FSMContext):
     """Обработка быстрого создания задачи"""
     try:
-        text = message.text if message.text else message.caption if message.caption else message.forward_from_message.caption if message.forward_from_message else None
+        text = message.text if message.text else message.caption
         
         # Парсим данные с помощью регулярных выражений
-        task_match = re.search(r'^(.*?)(\s@|$)', text)
+        if text.startswith('@'):
+            # Захватить всё до появления '//' или до конца строки.
+            task_match = re.search(r'^(.*?)(?=//|$)', text)
+        else:
+            # Захватывать всё от начала до пробела перед @, если он есть, или до конца строки.
+            task_match = re.search(r'^(.*?)(\s@|$)', text)
         executor_match = re.search(r'(@[^\s]+)', text)
         deadline_match = re.search(r'//\s*(.+)', text)
         deadline_raw = deadline_match.group(1) if deadline_match else None
@@ -1560,7 +1565,7 @@ async def show_deadline_options(message_obj):
 async def process_deadline_choice(callback_query: types.CallbackQuery, state: FSMContext):
     """Обработка выбора типа срока"""
     if callback_query.data == "set_deadline_custom":
-        await bot.send_message(chat_id=callback_query.from_user.id, text="📅 Введите дату в формате YYYY-MM-DD или DD.MM.YYYY:")
+        await bot.send_message(chat_id=callback_query.from_user.id, text="📅 Введите дату в формате DD.MM.YYYY:")
         await TaskUpdate.waiting_for_custom_deadline.set()
     else:
         user_data = await state.get_data()
@@ -1642,7 +1647,7 @@ async def process_custom_deadline(message: types.Message, state: FSMContext):
         await bot.send_message(chat_id=message.from_user.id,text=f"✅ Новый срок установлен: {new_deadline}")
         await state.finish()
     except ValueError:
-        await bot.send_message(chat_id=message.from_user.id, text="⚠ Неверный формат даты! Используйте YYYY-MM-DD или DD.MM.YYYY")
+        await bot.send_message(chat_id=message.from_user.id, text="⚠ Неверный формат даты! Используйте DD.MM.YYYY")
         await state.finish()
 
 # ======================
